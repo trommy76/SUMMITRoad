@@ -70,6 +70,10 @@ final class AppState: ObservableObject {
     let ble = BLEManager()
     let strava = StravaClient()
     let updater = Updater()
+    /// Held for the life of the app so the Mac (and display) never idle-sleeps mid-ride.
+    private let sleepBlocker = ProcessInfo.processInfo.beginActivity(
+        options: [.idleSystemSleepDisabled, .idleDisplaySleepDisabled, .userInitiated],
+        reason: "SummitRoad is running")
 
     @Published var session: RideSession?
     @Published var review: RideSummary?
