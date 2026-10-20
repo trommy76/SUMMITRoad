@@ -514,10 +514,11 @@ th{color:var(--mut);font-size:12px;text-transform:uppercase}tbody tr{cursor:poin
 .muted{color:var(--mut)}.scroll{overflow-x:auto}#detail{display:none}
 input[type=text],input[type=password]{background:#111114;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:7px 10px;margin:0 6px 6px 0}
 .row{display:flex;flex-wrap:wrap;align-items:center}.msg{margin-top:6px;font-size:13px}.ok{color:var(--green)}.err{color:#e5484d}
+#planWeeks table{table-layout:fixed}#planWeeks td:nth-child(1){width:150px}#planWeeks td:nth-child(3){width:230px}
 nav{display:flex;gap:4px;margin-left:12px}nav a{color:var(--mut);text-decoration:none;padding:6px 12px;border-radius:6px}nav a.on{color:var(--fg);background:#2c2c33}
 .fb li{margin:4px 0}button{background:#2c2c33;color:var(--fg);border:0;border-radius:6px;padding:6px 12px;cursor:pointer}
 </style></head><body>
-<header><div class="logo"><b>SUMMIT</b><span>ROAD</span></div><nav><a href="#" id="navDash">Dashboard</a><a href="#settings" id="navSettings">Settings</a></nav><div class="muted" id="who" style="margin-left:auto"></div><div class="muted" id="ver"></div></header>
+<header><div class="logo"><b>SUMMIT</b><span>ROAD</span></div><nav><a href="#" id="navDash">Dashboard</a><a href="#plan" id="navPlan">Training Plan</a><a href="#settings" id="navSettings">Settings</a></nav><div class="muted" id="who" style="margin-left:auto"></div><div class="muted" id="ver"></div></header>
 <main>
 <div id="pageDash">
 <div class="tiles" id="tiles"></div>
@@ -528,6 +529,8 @@ nav{display:flex;gap:4px;margin-left:12px}nav a{color:var(--mut);text-decoration
 <div class="card" style="margin-top:20px"><h2>Rides</h2><div class="scroll"><table><thead><tr>
 <th>Date</th><th>Workout</th><th>Time</th><th>Avg W</th><th>NP</th><th>TSS</th><th>HR</th><th>Score</th></tr></thead><tbody id="rows"></tbody></table></div></div>
 </div>
+<div id="pagePlan" style="display:none"><h1 style="font-size:22px;margin:0 0 16px">Training Plan</h1>
+<div class="tiles" id="planTiles"></div><div id="planWeeks"></div></div>
 <div id="pageSettings" style="display:none"><h1 style="font-size:22px;margin:0 0 16px">Settings</h1>
 <div class="card"><h2>Change password</h2>
 <div class="row"><input type="password" id="pwold" placeholder="Current password"><input type="password" id="pwnew" placeholder="New password (min 10)"><input type="password" id="pwnew2" placeholder="Repeat new password"><button onclick="changePw()">Change password</button></div>
@@ -581,6 +584,28 @@ async function delUser(name){
   catch(e){say('umsg',e.message)}}
 let me='';
 const EV={login:'Signed in',login_failed:'Failed sign-in',throttled:'Blocked (too many failures)',sync:'App synced',dashboard_view:'Viewed dashboard',ride_added:'Ride uploaded',ride_updated:'Ride updated',ride_deleted:'Ride deleted',plan_updated:'Training plan synced',plan_cleared:'Training plan cleared',settings_updated:'Settings synced',ftp_added:'FTP result added',password_changed:'Password changed',password_change_failed:'Password change failed',password_reset:'Password reset',user_added:'User added',user_deleted:'User deleted'};
+const KIND={endurance:'Endurance',tempo:'Tempo',sweetSpot:'Sweet Spot',threshold:'Threshold',overUnder:'Over-Unders',vo2:'VO2 Max',vo2OnOff:'VO2 Max On-Offs',ftpRamp:'FTP Ramp Test',ftp20:'FTP 20-Minute Test',adhoc:'Workout'};
+const GOAL={raiseFTP:'Raise my FTP',timeTrial:'Time trial / sustained power',roadRace:'Road race / criterium',century:'Century / long event',general:'General fitness'};
+const PHASE={base:'Base',build:'Build',specialty:'Specialty'};
+async function loadPlan(){
+  let doc;try{doc=await api('/api/docs/plan')}catch(e){doc=null}
+  if(!doc||doc.deleted||!doc.data){$('planTiles').innerHTML='';$('planWeeks').innerHTML='<div class="card muted">No training plan has been synced yet. Build one in the SummitRoad app and it will appear here.</div>';return}
+  const p=doc.data,ws=p.workouts||[],today=new Date();today.setHours(0,0,0,0);
+  const done=ws.filter(w=>w.completedDate).length,missed=ws.filter(w=>!w.completedDate&&new Date(w.date)<today).length;
+  const scores=ws.filter(w=>w.completedScore!=null).map(w=>w.completedScore),avg=scores.length?Math.round(scores.reduce((a,b)=>a+b,0)/scores.length):null;
+  const q=p.questionnaire||{},adj=p.levelAdjust||0;
+  $('planTiles').innerHTML=[['Goal',GOAL[q.goal]||q.goal||'—'],['Length',(q.weeks||'?')+' weeks · '+(q.weeklyHours||'?')+' h/wk'],['Completed',done+' of '+ws.length],['Missed',missed],['Avg score',avg??'—'],['Start FTP',Math.round(p.startFTP||0)+' W'],['Difficulty adj.',(adj>=0?'+':'')+adj]]
+    .map(([l,v])=>'<div class="tile"><div class="v" style="font-size:20px">'+esc(v)+'</div><div class="l">'+l+'</div></div>').join('');
+  const byWeek={};ws.forEach(w=>(byWeek[w.week]=byWeek[w.week]||[]).push(w));
+  $('planWeeks').innerHTML=Object.keys(byWeek).map(Number).sort((a,b)=>a-b).map(wk=>{
+    const items=byWeek[wk].sort((a,b)=>new Date(a.date)-new Date(b.date)),f=items[0];
+    const start=new Date(items[0].date),end=new Date(items[items.length-1].date),cur=today>=new Date(+start-6*864e5)&&today<=end;
+    return '<div class="card" style="margin-bottom:12px'+(cur?';border:1px solid var(--accent)':'')+'"><h2>Week '+wk+' · '+esc(PHASE[f.phase]||f.phase)+(f.recoveryWeek?' · Recovery':'')+(cur?' <span class="muted">(this week)</span>':'')+'</h2><table><tbody>'
+     +items.map(w=>{const isDone=!!w.completedDate,isMissed=!isDone&&new Date(w.date)<today;
+       const name=(KIND[w.kind]||w.kind)+(['ftpRamp','ftp20'].includes(w.kind)?'':' · level '+w.level)+(w.kind==='endurance'&&w.minutes?' · '+w.minutes+' min':'')+(w.isLong?' (long)':'');
+       const status=isDone?'<span class="score">✓ done'+(w.completedScore!=null?' · score '+Math.round(w.completedScore):'')+'</span>':isMissed?'<span class="err">missed</span>':'<span class="muted">upcoming</span>';
+       return '<tr style="cursor:default"><td>'+fmtD(w.date)+'</td><td>'+esc(name)+'</td><td>'+status+'</td></tr>'}).join('')+'</tbody></table></div>'}).join('')
+    +'<div class="muted" style="font-size:12px">Last updated '+new Date(doc.updated*1000).toLocaleString()+'. Read-only: edit the plan in the SummitRoad app.</div>'}
 async function loadLog(){
   const sel=$('logUser');const who=sel.style.display==='none'?'':sel.value;
   const rows=await api('/api/log?limit=200'+(who?'&user='+encodeURIComponent(who):''));
@@ -588,9 +613,10 @@ async function loadLog(){
 async function initLog(isAdmin){
   if(isAdmin){const us=await api('/api/users');const sel=$('logUser');sel.innerHTML='<option value="">All users</option>'+us.map(u=>'<option>'+esc(u.username)+'</option>').join('');sel.style.display='inline-block';sel.onchange=loadLog}
   loadLog()}
-function route(){const st=location.hash==='#settings';
-  $('pageDash').style.display=st?'none':'block';$('pageSettings').style.display=st?'block':'none';
-  $('navDash').className=st?'':'on';$('navSettings').className=st?'on':'';window.scrollTo(0,0)}
+function route(){const h=location.hash,pg=h==='#settings'?'settings':h==='#plan'?'plan':'dash';
+  $('pageDash').style.display=pg==='dash'?'block':'none';$('pagePlan').style.display=pg==='plan'?'block':'none';$('pageSettings').style.display=pg==='settings'?'block':'none';
+  $('navDash').className=pg==='dash'?'on':'';$('navPlan').className=pg==='plan'?'on':'';$('navSettings').className=pg==='settings'?'on':'';
+  if(pg==='plan')loadPlan();window.scrollTo(0,0)}
 window.addEventListener('hashchange',route);route();
 async function load(){
   const [rides,ftp,meInfo]=await Promise.all([api('/api/rides'),api('/api/ftp'),api('/api/ping')]);

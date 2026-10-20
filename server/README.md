@@ -57,6 +57,11 @@ docker exec -it summitroad python server.py users                   # list users
 The password in `docker-compose.yml` is only used to create the admin the first time. Changing it later does not
 change the stored password; use the dashboard or the command above.
 
+## Training plan page
+
+The dashboard has a read-only **Training Plan** page showing the plan synced from the app: goal, progress, missed and
+completed workouts with their scores, and every week grouped by phase. Edit the plan in the app.
+
 ## Activity log
 
 The server records what happens: sign-ins, failed sign-ins and lockouts, app syncs and dashboard views, rides and FTP
