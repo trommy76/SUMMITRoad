@@ -6,9 +6,9 @@ Standard library only. Data lives in $SUMMITROAD_DATA (default /data).
   python server.py adduser NAME [PASS] [--admin]  create a user or reset their password (prompts if PASS omitted)
   python server.py users                list users
 """
-import base64, getpass, hashlib, hmac, json, os, re, secrets, sqlite3, sys, threading, time
+import base64, getpass, hashlib, hmac, json, os, queue, re, secrets, sqlite3, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 def _read_version():
     try:
@@ -26,6 +26,8 @@ FAIL_WINDOW = 600          # seconds
 MAX_FAILS_IP = 10          # failed logins per client IP within the window
 MAX_FAILS_USER = 30        # failed logins per username within the window (all IPs)
 RUN_UID = 10001
+LOG_KEEP_DAYS = 90         # activity log retention
+LOG_MAX_ROWS = 20000
 DATA_DIR = os.environ.get("SUMMITROAD_DATA", "/data")
 PORT = int(os.environ.get("SUMMITROAD_PORT", "8787"))
 MAX_BODY = 64 * 1024 * 1024
@@ -38,6 +40,8 @@ CREATE TABLE IF NOT EXISTS rides (
   user TEXT, id TEXT, date TEXT, data TEXT, deleted INTEGER DEFAULT 0, updated REAL, fit BLOB,
   PRIMARY KEY (user, id));
 CREATE TABLE IF NOT EXISTS ftp (user TEXT, id TEXT, date TEXT, ftp REAL, method TEXT, PRIMARY KEY (user, id));
+CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, user TEXT, ip TEXT, client TEXT, type TEXT, detail TEXT);
+CREATE INDEX IF NOT EXISTS events_user ON events (user, id);
 """
 
 
@@ -146,6 +150,42 @@ def drop_privileges():
     os.setuid(RUN_UID)
 
 
+_events = queue.Queue()
+_seen = {}
+
+
+def first_seen(key, ttl):
+    """True the first time `key` is seen within `ttl` seconds (used to avoid logging every request)."""
+    now = time.time()
+    with _fails_lock:
+        if len(_seen) > 5000:
+            _seen.clear()
+        if now - _seen.get(key, 0) > ttl:
+            _seen[key] = now
+            return True
+    return False
+
+
+def log_event(user, ip, client, etype, detail=""):
+    sys.stderr.write("EVENT %-16s user=%s ip=%s client=%s %s\n" % (etype, user, ip, client, detail))
+    _events.put((time.time(), user, ip, client, etype, detail))
+
+
+def _event_worker():
+    n = 0
+    while True:
+        row = _events.get()
+        try:
+            with db() as c:
+                c.execute("INSERT INTO events (ts, user, ip, client, type, detail) VALUES (?,?,?,?,?,?)", row)
+                n += 1
+                if n % 200 == 1:
+                    c.execute("DELETE FROM events WHERE ts < ?", (time.time() - LOG_KEEP_DAYS * 86400,))
+                    c.execute("DELETE FROM events WHERE id <= (SELECT MAX(id) FROM events) - ?", (LOG_MAX_ROWS,))
+        except Exception as e:
+            sys.stderr.write("event log write failed: %s\n" % e)
+
+
 def ride_summary(row):
     if row["deleted"]:
         return {"id": row["id"], "deleted": True}
@@ -164,6 +204,12 @@ CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 
 class Handler(BaseHTTPRequestHandler):
     server_version = "SummitRoad"
     timeout = 30          # drop slow or stalled connections
+
+    def client_kind(self):
+        return "app" if self.headers.get("X-Requested-With") == "SummitRoad" else "browser"
+
+    def ev(self, user, etype, detail=""):
+        log_event(user, self.client_ip(), self.client_kind(), etype, detail)
 
     def client_ip(self):
         if TRUST_PROXY:
@@ -208,12 +254,17 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 u, _, p = base64.b64decode(h[6:]).decode().partition(":")
                 if throttled(ip, u):
+                    if first_seen(("throttle", ip), 300):
+                        log_event(u[:40], ip, self.client_kind(), "throttled", "too many failed logins")
                     self.send(429, {"error": "too many failed logins, try again later"}, extra={"Retry-After": "300"})
                     return None
                 if check_login(u, p):
+                    if first_seen(("login", u, ip, self.client_kind()), 1800):
+                        self.ev(u, "login")
                     return u
                 record_fail(ip, u)
                 sys.stderr.write("AUTH FAIL ip=%s user=%r\n" % (ip, u[:40]))
+                log_event(u[:40], ip, self.client_kind(), "login_failed")
             except Exception:
                 pass
         self.send(401, {"error": "login required"}, extra={"WWW-Authenticate": 'Basic realm="SummitRoad", charset="UTF-8"'})
@@ -250,6 +301,8 @@ class Handler(BaseHTTPRequestHandler):
             if parts == ["ping"]:
                 return self.send(200, {"ok": True, "user": u, "server": VERSION, "admin": is_admin(u)})
             if parts == ["rides"]:
+                if first_seen(("sync", u, self.client_ip(), self.client_kind()), 60):
+                    self.ev(u, "sync" if self.client_kind() == "app" else "dashboard_view")
                 rows = c.execute("SELECT id, data, deleted, fit FROM rides WHERE user=? ORDER BY date DESC", (u,)).fetchall()
                 return self.send(200, [ride_summary(r) for r in rows])
             if len(parts) in (2, 3) and parts[0] == "rides" and UUID_RE.match(parts[1]):
@@ -265,6 +318,18 @@ class Handler(BaseHTTPRequestHandler):
                         return self.send(404, {"error": "no fit file"})
                     return self.send(200, bytes(row["fit"]), "application/octet-stream",
                                      {"Content-Disposition": 'attachment; filename="%s.fit"' % row["id"]})
+            if parts == ["log"]:
+                q = parse_qs(urlparse(self.path).query)
+                try:
+                    limit = max(1, min(1000, int(q.get("limit", ["200"])[0])))
+                except ValueError:
+                    limit = 200
+                who = q.get("user", [""])[0] if is_admin(u) else u
+                if who:
+                    rows = c.execute("SELECT ts, user, ip, client, type, detail FROM events WHERE user=? ORDER BY id DESC LIMIT ?", (who, limit)).fetchall()
+                else:
+                    rows = c.execute("SELECT ts, user, ip, client, type, detail FROM events ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+                return self.send(200, [dict(r) for r in rows])
             if parts == ["users"]:
                 if not is_admin(u):
                     return self.send(403, {"error": "admin only"})
@@ -300,6 +365,8 @@ class Handler(BaseHTTPRequestHandler):
                 row = c.execute("SELECT deleted FROM rides WHERE user=? AND id=?", (u, rid)).fetchone()
                 if row and row["deleted"]:
                     return self.send(410, {"error": "deleted"})
+                self.ev(u, "ride_updated" if row else "ride_added",
+                        "%s (%s)" % (str(obj.get("workoutName", ""))[:60], date[:10]))
                 c.execute("INSERT INTO rides (user, id, date, data, updated) VALUES (?,?,?,?,?) "
                           "ON CONFLICT(user, id) DO UPDATE SET date=excluded.date, data=excluded.data, updated=excluded.updated",
                           (u, rid, date, data.decode(), time.time()))
@@ -312,6 +379,8 @@ class Handler(BaseHTTPRequestHandler):
             if parts[1] == "ftp" and len(parts) == 3:
                 try:
                     obj = json.loads(data)
+                    if not c.execute("SELECT 1 FROM ftp WHERE user=? AND id=?", (u, rid)).fetchone():
+                        self.ev(u, "ftp_added", "%s W (%s)" % (int(float(obj["ftp"])), str(obj.get("method", ""))[:30]))
                     c.execute("INSERT INTO ftp (user, id, date, ftp, method) VALUES (?,?,?,?,?) "
                               "ON CONFLICT(user, id) DO UPDATE SET date=excluded.date, ftp=excluded.ftp, method=excluded.method",
                               (u, rid, str(obj["date"]), float(obj["ftp"]), str(obj.get("method", ""))))
@@ -335,10 +404,12 @@ class Handler(BaseHTTPRequestHandler):
         if parts == ["api", "password"]:                       # change your own password
             old, new = str(obj.get("old", "")), str(obj.get("new", ""))
             if not check_login(u, old):
+                self.ev(u, "password_change_failed", "wrong current password")
                 return self.send(403, {"error": "current password is wrong"})
             if len(new) < MIN_PW:
                 return self.send(400, {"error": "new password must be at least %d characters" % MIN_PW})
             set_user(u, new)
+            self.ev(u, "password_changed")
             return self.send(200, {"ok": True})
         if parts[:2] == ["api", "users"]:
             if not is_admin(u):
@@ -353,6 +424,7 @@ class Handler(BaseHTTPRequestHandler):
                     if c.execute("SELECT 1 FROM users WHERE username=?", (name,)).fetchone():
                         return self.send(409, {"error": "that user already exists"})
                 set_user(name, pw, bool(obj.get("admin")))
+                self.ev(u, "user_added", name + (" (admin)" if obj.get("admin") else ""))
                 return self.send(200, {"ok": True})
             if len(parts) == 4 and parts[3] == "password":     # reset someone's password
                 name, pw = parts[2], str(obj.get("new", ""))
@@ -362,6 +434,7 @@ class Handler(BaseHTTPRequestHandler):
                     if not c.execute("SELECT 1 FROM users WHERE username=?", (name,)).fetchone():
                         return self.send(404, {"error": "no such user"})
                 set_user(name, pw)
+                self.ev(u, "password_reset", "for " + name)
                 return self.send(200, {"ok": True})
         self.send(404, {"error": "not found"})
 
@@ -381,10 +454,13 @@ class Handler(BaseHTTPRequestHandler):
                 c.execute("DELETE FROM ftp WHERE user=?", (name,))
                 cur = c.execute("DELETE FROM users WHERE username=?", (name,))
             forget_logins()
+            if cur.rowcount:
+                self.ev(u, "user_deleted", name)
             return self.send(200 if cur.rowcount else 404, {"ok": cur.rowcount > 0})
         if len(parts) == 3 and parts[:2] == ["api", "rides"] and UUID_RE.match(parts[2]):
             rid = parts[2].upper()
             with db() as c:
+                self.ev(u, "ride_deleted", rid[:8])
                 c.execute("INSERT INTO rides (user, id, date, data, deleted, updated) VALUES (?,?,'', '', 1, ?) "
                           "ON CONFLICT(user, id) DO UPDATE SET deleted=1, data='', fit=NULL, updated=excluded.updated",
                           (u, rid, time.time()))
@@ -436,6 +512,11 @@ nav{display:flex;gap:4px;margin-left:12px}nav a{color:var(--mut);text-decoration
 <div class="row"><input type="text" id="nuname" placeholder="Username"><input type="password" id="nupw" placeholder="Password (min 10)"><label class="muted" style="margin-right:10px"><input type="checkbox" id="nuadmin"> admin</label><button onclick="addUser()">Add user</button></div>
 <div id="umsg" class="msg"></div></div>
 
+
+<div class="card" style="margin-top:20px"><div style="display:flex;justify-content:space-between;align-items:center"><h2>Activity log</h2>
+<div><select id="logUser" style="display:none;background:#111114;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px"></select> <button onclick="loadLog()">Refresh</button></div></div>
+<div class="scroll"><table><thead><tr><th>Time</th><th>User</th><th>Event</th><th>From</th><th>Details</th></tr></thead><tbody id="logRows"></tbody></table></div>
+<div class="muted" style="margin-top:8px;font-size:12px">Showing the latest 200 events. Kept for 90 days.</div></div>
 </div>
 </main>
 <script>
@@ -473,13 +554,21 @@ async function delUser(name){
   try{await call('DELETE','/api/users/'+encodeURIComponent(name));say('umsg','Deleted '+name+'.',true);loadUsers()}
   catch(e){say('umsg',e.message)}}
 let me='';
+const EV={login:'Signed in',login_failed:'Failed sign-in',throttled:'Blocked (too many failures)',sync:'App synced',dashboard_view:'Viewed dashboard',ride_added:'Ride uploaded',ride_updated:'Ride updated',ride_deleted:'Ride deleted',ftp_added:'FTP result added',password_changed:'Password changed',password_change_failed:'Password change failed',password_reset:'Password reset',user_added:'User added',user_deleted:'User deleted'};
+async function loadLog(){
+  const sel=$('logUser');const who=sel.style.display==='none'?'':sel.value;
+  const rows=await api('/api/log?limit=200'+(who?'&user='+encodeURIComponent(who):''));
+  $('logRows').innerHTML=rows.map(r=>'<tr style="cursor:default"><td>'+new Date(r.ts*1000).toLocaleString()+'</td><td>'+esc(r.user)+'</td><td>'+esc(EV[r.type]||r.type)+'</td><td>'+esc(r.client)+' · '+esc(r.ip)+'</td><td class="muted">'+esc(r.detail)+'</td></tr>').join('')||'<tr><td colspan="5" class="muted">Nothing logged yet.</td></tr>'}
+async function initLog(isAdmin){
+  if(isAdmin){const us=await api('/api/users');const sel=$('logUser');sel.innerHTML='<option value="">All users</option>'+us.map(u=>'<option>'+esc(u.username)+'</option>').join('');sel.style.display='inline-block';sel.onchange=loadLog}
+  loadLog()}
 function route(){const st=location.hash==='#settings';
   $('pageDash').style.display=st?'none':'block';$('pageSettings').style.display=st?'block':'none';
   $('navDash').className=st?'':'on';$('navSettings').className=st?'on':'';window.scrollTo(0,0)}
 window.addEventListener('hashchange',route);route();
 async function load(){
   const [rides,ftp,meInfo]=await Promise.all([api('/api/rides'),api('/api/ftp'),api('/api/ping')]);
-  me=meInfo.user;$('ver').textContent='server v'+meInfo.server;$('who').textContent='signed in as '+me+(meInfo.admin?' (admin)':'');if(meInfo.admin)loadUsers();
+  me=meInfo.user;$('ver').textContent='server v'+meInfo.server;$('who').textContent='signed in as '+me+(meInfo.admin?' (admin)':'');if(meInfo.admin)loadUsers();initLog(meInfo.admin);
   const live=rides.filter(r=>!r.deleted);
   const tot=live.reduce((a,r)=>({s:a.s+r.durationSeconds,t:a.t+r.tss,k:a.k+r.kj}),{s:0,t:0,k:0});
   const cur=ftp.length?ftp[ftp.length-1].ftp:null;
@@ -550,6 +639,7 @@ def main():
             print("WARNING: no users exist. Set SUMMITROAD_USER and SUMMITROAD_PASSWORD, or run: "
                   "docker exec -it summitroad python server.py adduser NAME --admin")
     drop_privileges()
+    threading.Thread(target=_event_worker, daemon=True).start()
     print("SummitRoad server %s listening on :%d (data: %s, uid %d, trust proxy: %s)"
           % (VERSION, PORT, DATA_DIR, os.getuid(), TRUST_PROXY))
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

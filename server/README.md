@@ -53,6 +53,19 @@ docker exec -it summitroad python server.py users                   # list users
 The password in `docker-compose.yml` is only used to create the admin the first time. Changing it later does not
 change the stored password; use the dashboard or the command above.
 
+## Activity log
+
+The server records what happens: sign-ins, failed sign-ins and lockouts, app syncs and dashboard views, rides and FTP
+results being added or deleted, password changes and resets, and users being added or removed. Each entry has the time,
+user, client (`app` or `browser`) and IP address (the real visitor's IP when behind Cloudflare with
+`SUMMITROAD_TRUST_PROXY: "1"`).
+
+- **In the dashboard:** Settings > Activity log. The admin sees everyone (with a user filter); other users see only
+  their own activity, including failed attempts on their username.
+- **In the container log:** the same events appear as `EVENT ...` lines in `docker logs summitroad`.
+- Entries are kept for 90 days (and at most 20,000). Repeated sign-ins and syncs from the same place are logged once
+  per 30 minutes / 1 minute so the log stays readable.
+
 ## Exposing it to the internet (Cloudflare in front)
 
 The server itself only speaks HTTP, so never publish port 8787 directly. Put HTTPS in front of it:
