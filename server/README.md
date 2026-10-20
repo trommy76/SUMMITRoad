@@ -5,11 +5,25 @@ browser dashboard. The SummitRoad app works fine without it.
 
 ## Run it
 
+On a machine without git, download the repository as a zip (it is public):
+
 ```bash
-cd server
+curl -L https://github.com/trommy76/SUMMITRoad/archive/refs/heads/main.zip -o summitroad.zip
+unzip summitroad.zip
+cd SUMMITRoad-main/server
+```
+
+(Or, with git: `git clone https://github.com/trommy76/SUMMITRoad.git && cd SUMMITRoad/server`.)
+
+Then:
+
+```bash
 # edit docker-compose.yml: set SUMMITROAD_USER and SUMMITROAD_PASSWORD
 docker compose up -d --build
 ```
+
+Compose builds the image on that machine from the three files in this folder, so nothing needs to be published.
+To update later, download the zip again and re-run `docker compose up -d --build`; your `data` folder is kept.
 
 Open `http://<this-machine>:8787` and sign in. Your data lives in `./data` (a SQLite file), so back that folder up.
 
