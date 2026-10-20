@@ -10,7 +10,15 @@ import base64, getpass, hashlib, hmac, json, os, re, secrets, sqlite3, sys, thre
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-VERSION = "1.1.0"
+def _read_version():
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION")) as f:
+            return f.read().strip() or "dev"
+    except OSError:
+        return "dev"
+
+
+VERSION = _read_version()
 USER_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
 MIN_PW = 6
 DATA_DIR = os.environ.get("SUMMITROAD_DATA", "/data")
@@ -329,7 +337,7 @@ input[type=text],input[type=password]{background:#111114;color:var(--fg);border:
 .row{display:flex;flex-wrap:wrap;align-items:center}.msg{margin-top:6px;font-size:13px}.ok{color:var(--green)}.err{color:#e5484d}
 .fb li{margin:4px 0}button{background:#2c2c33;color:var(--fg);border:0;border-radius:6px;padding:6px 12px;cursor:pointer}
 </style></head><body>
-<header><div class="logo"><b>SUMMIT</b><span>ROAD</span></div><div class="muted" id="who"></div></header>
+<header><div class="logo"><b>SUMMIT</b><span>ROAD</span></div><div class="muted" id="who"></div><div class="muted" id="ver" style="margin-left:auto"></div></header>
 <main>
 <div class="tiles" id="tiles"></div>
 <div class="grid"><div class="card"><h2>FTP history</h2><div id="ftp"></div></div>
@@ -384,7 +392,7 @@ async function delUser(name){
 let me='';
 async function load(){
   const [rides,ftp,meInfo]=await Promise.all([api('/api/rides'),api('/api/ftp'),api('/api/ping')]);
-  me=meInfo.user;$('who').textContent='signed in as '+me+(meInfo.admin?' (admin)':'');if(meInfo.admin)loadUsers();
+  me=meInfo.user;$('ver').textContent='server v'+meInfo.server;$('who').textContent='signed in as '+me+(meInfo.admin?' (admin)':'');if(meInfo.admin)loadUsers();
   const live=rides.filter(r=>!r.deleted);
   const tot=live.reduce((a,r)=>({s:a.s+r.durationSeconds,t:a.t+r.tss,k:a.k+r.kj}),{s:0,t:0,k:0});
   const cur=ftp.length?ftp[ftp.length-1].ftp:null;

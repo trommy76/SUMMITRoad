@@ -741,6 +741,7 @@ struct SettingsView: View {
                             if sync.busy { ProgressView().controlSize(.small) }
                         }
                         if !sync.status.isEmpty { Text(sync.status).font(.caption).foregroundColor(.gray) }
+                        if sync.configured, let v = sync.serverVersion { Text("Server version: v\(v)").font(.caption).foregroundColor(.gray) }
                         if let t = sync.lastSync { Text("Last sync: \(t.formatted(date: .abbreviated, time: .shortened))").font(.caption).foregroundColor(.gray) }
                     }
                 }

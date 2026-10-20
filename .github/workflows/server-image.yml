@@ -22,9 +22,13 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - id: v
+        run: echo "version=$(cat server/VERSION | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
           context: server
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/trommy76/summitroad-server:latest
+          tags: |
+            ghcr.io/trommy76/summitroad-server:latest
+            ghcr.io/trommy76/summitroad-server:${{ steps.v.outputs.version }}

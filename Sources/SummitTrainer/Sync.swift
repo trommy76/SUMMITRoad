@@ -7,6 +7,7 @@ final class SyncClient: ObservableObject {
     @Published var status = ""
     @Published var busy = false
     @Published var lastSync: Date?
+    @Published var serverVersion: String?
 
     private let store: Store
     private let passwordKey = "sync.password"
@@ -98,6 +99,7 @@ final class SyncClient: ObservableObject {
             let (d, code) = try await send("GET", "api/ping", base: url, auth: authHeader(user: u, password: password))
             guard code == 200 else { throw SyncError.http(code) }
             let ver = (try? JSONSerialization.jsonObject(with: d) as? [String: Any])?["server"] as? String
+            serverVersion = ver
             store.profile.syncURL = norm
             store.profile.syncUser = u
             Keychain.set(password, for: passwordKey)
@@ -137,7 +139,14 @@ final class SyncClient: ObservableObject {
     /// Runs shortly after launch. Always downloads; uploads only if the user has agreed to upload their data.
     func autoSync() async {
         guard configured else { return }
+        await refreshServerVersion()
         await syncAll(upload: store.profile.syncUploadOK == true, download: true, quiet: true)
+    }
+
+    private func refreshServerVersion() async {
+        if let (d, code) = try? await send("GET", "api/ping"), code == 200 {
+            serverVersion = (try? JSONSerialization.jsonObject(with: d) as? [String: Any])?["server"] as? String
+        }
     }
 
     // MARK: Push
@@ -182,6 +191,7 @@ final class SyncClient: ObservableObject {
         guard configured, !busy else { return }
         busy = true
         defer { busy = false }
+        await refreshServerVersion()
         if !quiet { status = "Syncing…" }
         var up = 0, down = 0, removed = 0, failed = 0
         do {
