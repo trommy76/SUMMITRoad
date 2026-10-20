@@ -220,7 +220,7 @@ struct RideView: View {
             Color.black.opacity(0.78).ignoresSafeArea()
             VStack(spacing: 16) {
                 Text(s.workout.name).font(.system(size: 34, weight: .heavy))
-                Text(s.workout.kind.blurb).foregroundColor(.gray).multilineTextAlignment(.center).frame(maxWidth: 520)
+                Text(s.workout.note ?? s.workout.kind.blurb).foregroundColor(.gray).multilineTextAlignment(.center).frame(maxWidth: 520)
                 HStack(spacing: 28) {
                     VStack { Text(formatTime(s.totalSeconds)).font(.title.bold()); Text("DURATION").font(.caption).foregroundColor(.gray) }
                     if !s.workout.kind.isTest {

@@ -91,11 +91,12 @@ final class AppState: ObservableObject {
 
     var ftp: Double? { store.profile.ftp }
 
-    func start(_ workout: Workout, planned: PlannedWorkout? = nil) {
+    func start(_ workout: Workout, planned: PlannedWorkout? = nil, intensity: Double = 1.0) {
         guard session == nil else { return }
         let s = RideSession(workout: workout, planned: planned, ble: ble,
                             ftp: workout.kind.isTest ? workout.ftp : (store.profile.ftp ?? workout.ftp),
                             maxHR: store.profile.maxHR, voice: store.profile.voiceCues)
+        s.intensityScale = intensity
         s.onFinish = { [weak self] summary in self?.finish(summary, workout: workout) }
         session = s
     }

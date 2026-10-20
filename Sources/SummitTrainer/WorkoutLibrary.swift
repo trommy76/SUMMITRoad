@@ -115,6 +115,9 @@ enum WorkoutLibrary {
 
         case .ftp20:
             return twentyMinuteTest(estimatedFTP: ftp)
+
+        case .adhoc:
+            return make(.endurance, level: level, ftp: ftp, minutes: minutes)
         }
     }
 

@@ -29,6 +29,7 @@ enum Scoring {
 
     static func score(workout: Workout, samples: [Sample], maxHR: Int) -> ScoreBreakdown? {
         if workout.kind.isTest { return nil }
+        if workout.segments.allSatisfy({ !$0.erg }) { return nil }   // free ride: nothing to score against
         guard !samples.isEmpty else { return nil }
 
         let sm = smoothed(samples)

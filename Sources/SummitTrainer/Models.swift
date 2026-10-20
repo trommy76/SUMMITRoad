@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Segment / workout model
 
 enum SegmentKind: String, Codable {
-    case warmup, cooldown, recovery, endurance, tempo, sweetSpot, threshold, vo2, anaerobic, test
+    case warmup, cooldown, recovery, endurance, tempo, sweetSpot, threshold, vo2, anaerobic, test, drill
 
     var title: String {
         switch self {
@@ -17,6 +17,7 @@ enum SegmentKind: String, Codable {
         case .vo2: return "VO2 Max"
         case .anaerobic: return "Anaerobic"
         case .test: return "FTP Test"
+        case .drill: return "Drill"
         }
     }
 
@@ -51,7 +52,7 @@ enum SegmentKind: String, Codable {
 }
 
 enum WorkoutKind: String, Codable, CaseIterable {
-    case endurance, tempo, sweetSpot, threshold, overUnder, vo2, vo2OnOff, ftpRamp, ftp20
+    case endurance, tempo, sweetSpot, threshold, overUnder, vo2, vo2OnOff, ftpRamp, ftp20, adhoc
 
     var title: String {
         switch self {
@@ -64,6 +65,7 @@ enum WorkoutKind: String, Codable, CaseIterable {
         case .vo2OnOff: return "VO2 Max On-Offs"
         case .ftpRamp: return "Ramp Test"
         case .ftp20: return "20-Minute Test"
+        case .adhoc: return "Workout"
         }
     }
 
@@ -80,6 +82,7 @@ enum WorkoutKind: String, Codable, CaseIterable {
         case .vo2OnOff: return "Short, very hard repeats. Big aerobic gains for little time."
         case .ftpRamp: return "Step-by-step ramp until failure. FTP = 75% of best 1-minute power."
         case .ftp20: return "Warm-up, a hard opener, then a 20-minute all-out effort. FTP = 95% of average."
+        case .adhoc: return "An ad-hoc workout scaled to your current FTP."
         }
     }
 }
@@ -137,6 +140,7 @@ struct Workout: Codable, Identifiable {
     var kind: WorkoutKind
     var ftp: Double
     var segments: [Segment]
+    var note: String? = nil
 
     var totalSeconds: Int { segments.reduce(0) { $0 + $1.seconds } }
 

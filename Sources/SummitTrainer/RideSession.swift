@@ -184,7 +184,9 @@ final class RideSession: ObservableObject {
         let base = seg.erg ? Int(seg.targetWatts(ftp: ftp, at: segElapsed).rounded()) : nil
         targetPower = base.map { Int((Double($0) * intensityScale).rounded()) }
 
-        samples.append(Sample(t: elapsed, power: power, hr: hr, cad: cadence, target: base, kind: seg.kind, seg: segIndex))
+        // Ad-hoc rides are scored against the intensity the rider chose; plan rides keep the planned target.
+        let recorded = workout.kind == .adhoc ? targetPower : base
+        samples.append(Sample(t: elapsed, power: power, hr: hr, cad: cadence, target: recorded, kind: seg.kind, seg: segIndex))
         updateMetrics()
 
         elapsed += 1
@@ -275,7 +277,9 @@ final class RideSession: ObservableObject {
         case .cooldown:
             say("Cool-down time. Spin easy, you earned it.")
         case .test where workout.kind == .ftpRamp:
-            if segIndex % 5 == 0 || segIndex == 1 {
+            if segIndex == 1 {
+                say("The ramp starts now. The trainer raises the power every minute. Keep spinning and stay relaxed.")
+            } else if segIndex % 5 == 0 {
                 say("Step up to \(Int(s.startPct)) watts. Keep spinning, stay relaxed.")
             }
         case .test:
@@ -317,7 +321,9 @@ final class RideSession: ObservableObject {
                 say("30 seconds left. Hold your form.")
             }
         } else if rem == 10 && seg.seconds >= 30 {
-            if let n = nextSegment {
+            if workout.kind == .ftpRamp && seg.kind == .warmup {
+                say("The ramp starts in 10 seconds. The trainer will raise the power every minute. Just keep pedalling.")
+            } else if let n = nextSegment {
                 say("10 seconds. Next up: \(n.label) at \(Int(n.startWatts(ftp: ftp).rounded())) watts.")
             } else {
                 say("10 seconds to the finish. Give it everything!")

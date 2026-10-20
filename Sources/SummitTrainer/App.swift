@@ -41,13 +41,14 @@ struct RootView: View {
 }
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case calendar = "Calendar", today = "Today", plan = "Training Plan", ftp = "FTP Test", history = "History", devices = "Devices", settings = "Settings"
+    case calendar = "Calendar", today = "Today", plan = "Training Plan", workouts = "Workouts", ftp = "FTP Test", history = "History", devices = "Devices", settings = "Settings"
     var id: String { rawValue }
     var icon: String {
         switch self {
         case .calendar: return "calendar"
         case .today: return "bolt.fill"
         case .plan: return "list.bullet.rectangle"
+        case .workouts: return "figure.indoor.cycle"
         case .ftp: return "gauge.high"
         case .history: return "clock.arrow.circlepath"
         case .devices: return "antenna.radiowaves.left.and.right"
@@ -57,7 +58,7 @@ enum AppTab: String, CaseIterable, Identifiable {
 }
 
 extension AppTab {
-    static let mainTabs: [AppTab] = [.calendar, .today, .plan, .ftp, .history]
+    static let mainTabs: [AppTab] = [.calendar, .today, .plan, .workouts, .ftp, .history]
     static let footerTabs: [AppTab] = [.devices, .settings]
 }
 
@@ -98,6 +99,7 @@ struct MainView: View {
             case .calendar: CalendarView()
             case .today: TodayView(tab: $tab)
             case .plan: PlanView()
+            case .workouts: WorkoutsView()
             case .ftp: FTPTestView()
             case .history: HistoryView()
             case .devices: DevicesView()
@@ -137,6 +139,7 @@ extension SegmentKind {
         case .vo2: return Color(red: 0.90, green: 0.25, blue: 0.25)
         case .anaerobic: return Color(red: 0.65, green: 0.30, blue: 0.85)
         case .test: return Color(red: 0.90, green: 0.35, blue: 0.60)
+        case .drill: return Color(red: 0.30, green: 0.70, blue: 0.80)
         }
     }
 }
