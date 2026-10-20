@@ -13,6 +13,8 @@
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>NSPrincipalClass</key><string>NSApplication</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSAppTransportSecurity</key>
+    <dict><key>NSAllowsLocalNetworking</key><true/></dict>
     <key>NSBluetoothAlwaysUsageDescription</key>
     <string>SummitRoad connects to your smart trainer and heart-rate monitor over Bluetooth.</string>
 </dict>

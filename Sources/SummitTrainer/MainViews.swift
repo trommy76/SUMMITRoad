@@ -652,6 +652,11 @@ struct SettingsView: View {
     @EnvironmentObject var store: Store
     @EnvironmentObject var strava: StravaClient
     @EnvironmentObject var updater: Updater
+    @EnvironmentObject var sync: SyncClient
+    @State private var syncURL = ""
+    @State private var syncUser = ""
+    @State private var syncPass = ""
+    @State private var askUpload = false
     @State private var ftpText = ""
     @State private var secret = ""
     @State private var confirmDelete = false
@@ -702,6 +707,45 @@ struct SettingsView: View {
                 }
 
                 Card {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Home Server (optional)").font(.headline)
+                        Text("Keep your rides, FTP history and .FIT files on your own SummitRoad server (Docker, on your home network) so other machines see them and you can browse them in a browser. Leave this blank to keep everything only on this Mac.")
+                            .font(.callout).foregroundColor(.gray)
+                        HStack {
+                            TextField("Server address, e.g. 192.168.1.20:8787", text: $syncURL).frame(width: 280)
+                            TextField("Username", text: $syncUser).frame(width: 130)
+                            SecureField("Password", text: $syncPass).frame(width: 150)
+                        }
+                        HStack {
+                            Button(sync.configured ? "Update Login" : "Connect") {
+                                Task {
+                                    if await sync.connect(urlString: syncURL, user: syncUser, password: syncPass) {
+                                        syncPass = ""
+                                        if store.profile.syncUploadOK == nil { askUpload = true }
+                                        else { await sync.syncAll(upload: store.profile.syncUploadOK == true, download: true) }
+                                    }
+                                }
+                            }
+                            .disabled(sync.busy)
+                            if sync.configured {
+                                Button("Sync Now") {
+                                    Task {
+                                        store.profile.syncUploadOK = true
+                                        await sync.syncAll(upload: true, download: true)
+                                    }
+                                }
+                                .disabled(sync.busy)
+                                if let u = sync.baseURL { Link("Open Dashboard", destination: u) }
+                                Button("Disconnect") { sync.disconnect() }.disabled(sync.busy)
+                            }
+                            if sync.busy { ProgressView().controlSize(.small) }
+                        }
+                        if !sync.status.isEmpty { Text(sync.status).font(.caption).foregroundColor(.gray) }
+                        if let t = sync.lastSync { Text("Last sync: \(t.formatted(date: .abbreviated, time: .shortened))").font(.caption).foregroundColor(.gray) }
+                    }
+                }
+
+                Card {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Software Update").font(.headline)
                         Text("Installed version: v\(Updater.currentVersion)").foregroundColor(.gray)
@@ -733,6 +777,18 @@ struct SettingsView: View {
             }
             .padding(24)
         }
+        .alert("Upload your existing data?", isPresented: $askUpload) {
+            Button("Upload Everything") {
+                store.profile.syncUploadOK = true
+                Task { await sync.syncAll(upload: true, download: true) }
+            }
+            Button("Not Now") {
+                store.profile.syncUploadOK = false
+                Task { await sync.syncAll(upload: false, download: true) }
+            }
+        } message: {
+            Text("Copy your \(store.rides.count) saved rides, their .FIT files and your FTP history to this server profile? Anything already on the server is downloaded here too. You can upload later with Sync Now.")
+        }
         .alert("Are you sure you want to delete your training plan?", isPresented: $confirmDelete) {
             Button("Cancel", role: .cancel) {}
             Button("Delete Plan", role: .destructive) { store.plan = nil }
@@ -741,6 +797,8 @@ struct SettingsView: View {
         }
         .onAppear {
             if let f = store.profile.ftp { ftpText = String(Int(f)) }
+            syncURL = store.profile.syncURL ?? ""
+            syncUser = store.profile.syncUser ?? ""
         }
     }
 }

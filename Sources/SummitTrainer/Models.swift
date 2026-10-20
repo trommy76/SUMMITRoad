@@ -243,6 +243,9 @@ struct Profile: Codable {
     var trainerID: String?
     var hrID: String?
     var stravaClientID: String = ""
+    var syncURL: String?
+    var syncUser: String?
+    var syncUploadOK: Bool?
 }
 
 // MARK: - Metrics

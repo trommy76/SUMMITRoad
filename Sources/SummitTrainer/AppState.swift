@@ -7,6 +7,11 @@ final class Store: ObservableObject {
     @Published var plan: TrainingPlan? { didSet { if let p = plan { write(p, "plan.json") } else { remove("plan.json") } } }
     @Published var rides: [RideSummary] = []
 
+    /// Hooks used by the optional home-server sync.
+    var onRideSaved: ((RideSummary) -> Void)?
+    var onRideDeleted: ((UUID) -> Void)?
+    var onFTPAdded: ((FTPEntry) -> Void)?
+
     let dir: URL
     private let encoder: JSONEncoder = {
         let e = JSONEncoder()
@@ -21,7 +26,11 @@ final class Store: ObservableObject {
 
     init() {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        dir = base.appendingPathComponent("SummitTrainer", isDirectory: true)
+        if let custom = ProcessInfo.processInfo.environment["SUMMITROAD_DATA_DIR"], !custom.isEmpty {
+            dir = URL(fileURLWithPath: custom, isDirectory: true)    // testing / separate profiles on one Mac
+        } else {
+            dir = base.appendingPathComponent("SummitTrainer", isDirectory: true)
+        }
         for sub in ["", "rides", "fit"] {
             try? FileManager.default.createDirectory(at: dir.appendingPathComponent(sub), withIntermediateDirectories: true)
         }
@@ -43,24 +52,28 @@ final class Store: ObservableObject {
     }
     private func remove(_ name: String) { try? FileManager.default.removeItem(at: dir.appendingPathComponent(name)) }
 
-    func save(ride: RideSummary) {
+    func save(ride: RideSummary, fromSync: Bool = false) {
         if let i = rides.firstIndex(where: { $0.id == ride.id }) { rides[i] = ride } else { rides.insert(ride, at: 0) }
         write(ride, "rides/\(ride.id.uuidString).json")
         try? FITEncoder.encode(ride).write(to: fitURL(for: ride), options: .atomic)
+        if !fromSync { onRideSaved?(ride) }
     }
 
     func fitURL(for r: RideSummary) -> URL { dir.appendingPathComponent("fit/\(r.id.uuidString).fit") }
 
-    func delete(ride: RideSummary) {
+    func delete(ride: RideSummary, fromSync: Bool = false) {
         rides.removeAll { $0.id == ride.id }
         remove("rides/\(ride.id.uuidString).json")
         remove("fit/\(ride.id.uuidString).fit")
+        if !fromSync { onRideDeleted?(ride.id) }
     }
 
     func setFTP(_ ftp: Double, method: String) {
         profile.ftp = ftp
         profile.ftpDate = Date()
-        profile.ftpHistory.append(FTPEntry(date: Date(), ftp: ftp, method: method))
+        let entry = FTPEntry(date: Date(), ftp: ftp, method: method)
+        profile.ftpHistory.append(entry)
+        onFTPAdded?(entry)
     }
 }
 
@@ -70,6 +83,7 @@ final class AppState: ObservableObject {
     let ble = BLEManager()
     let strava = StravaClient()
     let updater = Updater()
+    lazy var sync = SyncClient(store: store)
     /// Held for the life of the app so the Mac (and display) never idle-sleeps mid-ride.
     private let sleepBlocker = ProcessInfo.processInfo.beginActivity(
         options: [.idleSystemSleepDisabled, .idleDisplaySleepDisabled, .userInitiated],
@@ -82,9 +96,13 @@ final class AppState: ObservableObject {
     init() {
         ble.onRememberTrainer = { [weak self] id in self?.store.profile.trainerID = id.uuidString }
         ble.onRememberHR = { [weak self] id in self?.store.profile.hrID = id.uuidString }
+        store.onRideSaved = { [weak self] r in self?.sync.rideSaved(r) }
+        store.onRideDeleted = { [weak self] id in self?.sync.rideDeleted(id) }
+        store.onFTPAdded = { [weak self] e in self?.sync.ftpAdded(e) }
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             await self?.updater.check(silent: true)
+            await self?.sync.autoSync()
         }
         ble.reconnectKnown(trainerID: store.profile.trainerID, hrID: store.profile.hrID)
     }

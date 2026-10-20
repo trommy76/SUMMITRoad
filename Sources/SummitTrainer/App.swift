@@ -18,6 +18,7 @@ struct SummitTrainerApp: App {
                 .environmentObject(app.ble)
                 .environmentObject(app.strava)
                 .environmentObject(app.updater)
+                .environmentObject(app.sync)
                 .frame(minWidth: 1000, minHeight: 720)
                 .preferredColorScheme(.dark)
         }

@@ -1,0 +1,13 @@
+services:
+  summitroad:
+    build: .
+    container_name: summitroad
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      # Creates this user on first start (ignored if the user already exists).
+      SUMMITROAD_USER: "kevin"
+      SUMMITROAD_PASSWORD: "change-me"
+    volumes:
+      - ./data:/data
