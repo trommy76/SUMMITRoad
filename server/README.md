@@ -35,9 +35,9 @@ macOS only allows plain `http://` to local addresses: use an IP address, a `.loc
 
 The user in `docker-compose.yml` (`SUMMITROAD_USER`) is the **admin**. Sign in to the dashboard in a browser:
 
-- **Everyone** can change their own password in the Account box.
-- **The admin** also sees a Users box to add users (optionally as admins), reset anyone's password, and delete a
-  user (this removes all of that user's rides and FTP history).
+- **Everyone** can change their own password on the **Settings** page (top menu).
+- **The admin** also sees a Users section on Settings to add users (optionally as admins), reset anyone's password,
+  and delete a user (this removes all of that user's rides and FTP history).
 - Each user has their own login and their own data; nobody sees anyone else's rides.
 
 If you change your password, the SummitRoad app needs the new one: Settings > Home Server > Update Login.

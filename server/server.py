@@ -412,25 +412,31 @@ th{color:var(--mut);font-size:12px;text-transform:uppercase}tbody tr{cursor:poin
 .muted{color:var(--mut)}.scroll{overflow-x:auto}#detail{display:none}
 input[type=text],input[type=password]{background:#111114;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:7px 10px;margin:0 6px 6px 0}
 .row{display:flex;flex-wrap:wrap;align-items:center}.msg{margin-top:6px;font-size:13px}.ok{color:var(--green)}.err{color:#e5484d}
+nav{display:flex;gap:4px;margin-left:12px}nav a{color:var(--mut);text-decoration:none;padding:6px 12px;border-radius:6px}nav a.on{color:var(--fg);background:#2c2c33}
 .fb li{margin:4px 0}button{background:#2c2c33;color:var(--fg);border:0;border-radius:6px;padding:6px 12px;cursor:pointer}
 </style></head><body>
-<header><div class="logo"><b>SUMMIT</b><span>ROAD</span></div><div class="muted" id="who"></div><div class="muted" id="ver" style="margin-left:auto"></div></header>
+<header><div class="logo"><b>SUMMIT</b><span>ROAD</span></div><nav><a href="#" id="navDash">Dashboard</a><a href="#settings" id="navSettings">Settings</a></nav><div class="muted" id="who" style="margin-left:auto"></div><div class="muted" id="ver"></div></header>
 <main>
+<div id="pageDash">
 <div class="tiles" id="tiles"></div>
 <div class="grid"><div class="card"><h2>FTP history</h2><div id="ftp"></div></div>
 <div class="card"><h2>Weekly TSS (last 12 weeks)</h2><div id="weekly"></div></div></div>
 <div class="card" id="detail"><div style="display:flex;justify-content:space-between"><h2 id="dtitle"></h2><button onclick="document.getElementById('detail').style.display='none'">Close</button></div>
 <div id="dmeta" class="muted"></div><div id="dchart"></div><ul class="fb" id="dfb"></ul><div id="dlinks"></div></div>
-<div class="card" style="margin-top:20px"><h2>Account</h2>
+<div class="card" style="margin-top:20px"><h2>Rides</h2><div class="scroll"><table><thead><tr>
+<th>Date</th><th>Workout</th><th>Time</th><th>Avg W</th><th>NP</th><th>TSS</th><th>HR</th><th>Score</th></tr></thead><tbody id="rows"></tbody></table></div></div>
+</div>
+<div id="pageSettings" style="display:none"><h1 style="font-size:22px;margin:0 0 16px">Settings</h1>
+<div class="card"><h2>Change password</h2>
 <div class="row"><input type="password" id="pwold" placeholder="Current password"><input type="password" id="pwnew" placeholder="New password (min 10)"><input type="password" id="pwnew2" placeholder="Repeat new password"><button onclick="changePw()">Change password</button></div>
 <div id="pwmsg" class="msg"></div></div>
-<div class="card" id="usersCard" style="margin-top:20px;display:none"><h2>Users (admin)</h2>
+<div class="card" id="usersCard" style="display:none;margin-top:20px"><h2>Users (admin)</h2>
 <div class="scroll"><table><thead><tr><th>User</th><th>Role</th><th>Rides</th><th></th></tr></thead><tbody id="users"></tbody></table></div>
 <h2 style="margin-top:16px">Add a user</h2>
 <div class="row"><input type="text" id="nuname" placeholder="Username"><input type="password" id="nupw" placeholder="Password (min 10)"><label class="muted" style="margin-right:10px"><input type="checkbox" id="nuadmin"> admin</label><button onclick="addUser()">Add user</button></div>
 <div id="umsg" class="msg"></div></div>
-<div class="card" style="margin-top:20px"><h2>Rides</h2><div class="scroll"><table><thead><tr>
-<th>Date</th><th>Workout</th><th>Time</th><th>Avg W</th><th>NP</th><th>TSS</th><th>HR</th><th>Score</th></tr></thead><tbody id="rows"></tbody></table></div></div>
+
+</div>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -467,6 +473,10 @@ async function delUser(name){
   try{await call('DELETE','/api/users/'+encodeURIComponent(name));say('umsg','Deleted '+name+'.',true);loadUsers()}
   catch(e){say('umsg',e.message)}}
 let me='';
+function route(){const st=location.hash==='#settings';
+  $('pageDash').style.display=st?'none':'block';$('pageSettings').style.display=st?'block':'none';
+  $('navDash').className=st?'':'on';$('navSettings').className=st?'on':'';window.scrollTo(0,0)}
+window.addEventListener('hashchange',route);route();
 async function load(){
   const [rides,ftp,meInfo]=await Promise.all([api('/api/rides'),api('/api/ftp'),api('/api/ping')]);
   me=meInfo.user;$('ver').textContent='server v'+meInfo.server;$('who').textContent='signed in as '+me+(meInfo.admin?' (admin)':'');if(meInfo.admin)loadUsers();
