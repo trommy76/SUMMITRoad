@@ -655,7 +655,6 @@ struct SettingsView: View {
     @State private var ftpText = ""
     @State private var secret = ""
     @State private var confirmDelete = false
-    @State private var sampleStatus = ""
 
     var body: some View {
         ScrollView {
@@ -727,8 +726,6 @@ struct SettingsView: View {
                         Text("Rides, plan and .FIT files are stored in your Application Support folder.").foregroundColor(.gray)
                         Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([store.dir]) }
                         Button("Open .FIT Folder") { NSWorkspace.shared.open(store.dir.appendingPathComponent("fit")) }
-                        Button("Create Sample .FIT (test)") { sampleStatus = SampleFIT.createAndReveal(in: store.dir) == nil ? "Could not write the sample file." : "Sample created: drag SummitRoad-sample.fit onto the Garmin import page." }
-                        if !sampleStatus.isEmpty { Text(sampleStatus).font(.caption).foregroundColor(.gray) }
                         Button("Delete Training Plan", role: .destructive) { confirmDelete = true }
                             .disabled(store.plan == nil)
                     }

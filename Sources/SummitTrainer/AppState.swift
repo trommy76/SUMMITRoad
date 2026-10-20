@@ -82,10 +82,7 @@ final class AppState: ObservableObject {
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             await self?.updater.check(silent: true)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            guard let self = self else { return }
-            self.ble.reconnectKnown(trainerID: self.store.profile.trainerID, hrID: self.store.profile.hrID)
-        }
+        ble.reconnectKnown(trainerID: store.profile.trainerID, hrID: store.profile.hrID)
     }
 
     var ftp: Double? { store.profile.ftp }

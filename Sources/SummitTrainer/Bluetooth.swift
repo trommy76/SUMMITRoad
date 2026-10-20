@@ -61,6 +61,9 @@ final class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
     private var wantTrainerID: UUID?
     private var wantHRID: UUID?
     private var pendingScan = false
+    private var knownTrainerID: UUID?
+    private var knownHRID: UUID?
+    private var autoScanning = false
 
     // latest values with timestamps
     private var power: Int?, powerAt = Date.distantPast
@@ -130,22 +133,37 @@ final class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
         hrName = nil
     }
 
-    /// Reconnect to previously used devices without scanning.
+    /// Remember previously used devices and reconnect to them. Safe to call before Bluetooth is ready:
+    /// the attempt is repeated when the radio powers on.
     func reconnectKnown(trainerID: String?, hrID: String?) {
+        knownTrainerID = trainerID.flatMap { UUID(uuidString: $0) }
+        knownHRID = hrID.flatMap { UUID(uuidString: $0) }
+        attemptReconnect()
+    }
+
+    private func attemptReconnect() {
         guard central.state == .poweredOn else { return }
-        if let s = trainerID, let id = UUID(uuidString: s), trainerPeripheral == nil,
-           let p = central.retrievePeripherals(withIdentifiers: [id]).first {
-            peripherals[id] = p
-            trainerPeripheral = p
-            wantTrainerID = id
-            central.connect(p, options: nil)
+        var needScan = false
+        if let id = knownTrainerID, trainerPeripheral == nil {
+            if let p = central.retrievePeripherals(withIdentifiers: [id]).first {
+                peripherals[id] = p
+                trainerPeripheral = p
+                wantTrainerID = id
+                statusText = "Reconnecting to saved trainer…"
+                central.connect(p, options: nil)
+            } else { needScan = true }
         }
-        if let s = hrID, let id = UUID(uuidString: s), hrPeripheral == nil,
-           let p = central.retrievePeripherals(withIdentifiers: [id]).first {
-            peripherals[id] = p
-            hrPeripheral = p
-            wantHRID = id
-            central.connect(p, options: nil)
+        if let id = knownHRID, hrPeripheral == nil {
+            if let p = central.retrievePeripherals(withIdentifiers: [id]).first {
+                peripherals[id] = p
+                hrPeripheral = p
+                wantHRID = id
+                central.connect(p, options: nil)
+            } else { needScan = true }
+        }
+        if needScan && !scanning {
+            autoScanning = true
+            startScan()
         }
     }
 
@@ -199,6 +217,7 @@ final class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
             pendingScan = false
             startScan()
         }
+        if c.state == .poweredOn { attemptReconnect() }
     }
 
     func centralManager(_ c: CBCentralManager, didDiscover p: CBPeripheral,
@@ -206,6 +225,21 @@ final class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
         let uuids = (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID]) ?? []
         let name = p.name ?? (advertisementData[CBAdvertisementDataLocalNameKey] as? String) ?? "Unknown"
         peripherals[p.identifier] = p
+        if p.identifier == knownTrainerID && trainerPeripheral == nil {
+            trainerPeripheral = p
+            wantTrainerID = p.identifier
+            c.connect(p, options: nil)
+        }
+        if p.identifier == knownHRID && hrPeripheral == nil {
+            hrPeripheral = p
+            wantHRID = p.identifier
+            c.connect(p, options: nil)
+        }
+        if autoScanning {
+            let trainerDone = knownTrainerID == nil || trainerPeripheral != nil
+            let hrDone = knownHRID == nil || hrPeripheral != nil
+            if trainerDone && hrDone { autoScanning = false; stopScan() }
+        }
         let dev = BLEDevice(id: p.identifier, name: name, rssi: RSSI.intValue,
                             isTrainer: uuids.contains(BLEUUID.ftms),
                             isPower: uuids.contains(BLEUUID.cps),
@@ -234,6 +268,14 @@ final class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
 
     func centralManager(_ c: CBCentralManager, didFailToConnect p: CBPeripheral, error: Error?) {
         statusText = "Connection failed: \(error?.localizedDescription ?? "unknown")"
+        if p == trainerPeripheral && wantTrainerID == p.identifier || p == hrPeripheral && wantHRID == p.identifier {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                guard let self = self else { return }
+                let stillWanted = (p == self.trainerPeripheral && self.wantTrainerID == p.identifier)
+                    || (p == self.hrPeripheral && self.wantHRID == p.identifier)
+                if stillWanted { self.central.connect(p, options: nil) }
+            }
+        }
     }
 
     func centralManager(_ c: CBCentralManager, didDisconnectPeripheral p: CBPeripheral, error: Error?) {
