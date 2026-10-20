@@ -5,27 +5,20 @@ browser dashboard. The SummitRoad app works fine without it.
 
 ## Run it
 
-On a machine without git, download the repository as a zip (it is public):
+GitHub builds the server image automatically (`ghcr.io/trommy76/summitroad-server:latest`, for Intel and ARM), so
+the Docker host never has to build anything and needs no git. All it needs is `docker-compose.yml`.
 
-```bash
-curl -L https://github.com/trommy76/SUMMITRoad/archive/refs/heads/main.zip -o summitroad.zip
-unzip summitroad.zip
-cd SUMMITRoad-main/server
-```
+1. Copy [docker-compose.yml](docker-compose.yml) to the Docker host, or paste it into Dockhand / Portainer as a stack.
+2. Set `SUMMITROAD_USER` and `SUMMITROAD_PASSWORD` in it.
+3. Start it: `docker compose up -d` (or deploy the stack).
 
-(Or, with git: `git clone https://github.com/trommy76/SUMMITRoad.git && cd SUMMITRoad/server`.)
+Open `http://<this-machine>:8787` and sign in. Data lives in the `summitroad-data` Docker volume, so back that up.
+To update: `docker compose pull && docker compose up -d` (or redeploy the stack).
 
-Then:
+The first time, the package may be private. On GitHub open your profile > Packages > summitroad-server >
+Package settings > Change visibility > Public, so the host can pull it without a login.
 
-```bash
-# edit docker-compose.yml: set SUMMITROAD_USER and SUMMITROAD_PASSWORD
-docker compose up -d --build
-```
-
-Compose builds the image on that machine from the three files in this folder, so nothing needs to be published.
-To update later, download the zip again and re-run `docker compose up -d --build`; your `data` folder is kept.
-
-Open `http://<this-machine>:8787` and sign in. Your data lives in `./data` (a SQLite file), so back that folder up.
+To build it yourself instead, run `docker build -t summitroad-server server` and use `image: summitroad-server` in the compose file.
 
 ## In the app
 

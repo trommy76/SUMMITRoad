@@ -1,6 +1,6 @@
 services:
   summitroad:
-    build: .
+    image: ghcr.io/trommy76/summitroad-server:latest
     container_name: summitroad
     restart: unless-stopped
     ports:
@@ -10,4 +10,7 @@ services:
       SUMMITROAD_USER: "kevin"
       SUMMITROAD_PASSWORD: "change-me"
     volumes:
-      - ./data:/data
+      - summitroad-data:/data
+
+volumes:
+  summitroad-data:
