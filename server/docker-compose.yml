@@ -7,7 +7,7 @@ services:
       - "8787:8787"
     environment:
       # Creates this user on first start (ignored if the user already exists).
-      SUMMITROAD_USER: "kevin"
+      SUMMITROAD_USER: "admin"
       SUMMITROAD_PASSWORD: "change-me"
     volumes:
       - summitroad-data:/data
