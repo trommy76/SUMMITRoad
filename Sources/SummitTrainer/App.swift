@@ -17,11 +17,14 @@ struct SummitTrainerApp: App {
                 .environmentObject(app.store)
                 .environmentObject(app.ble)
                 .environmentObject(app.strava)
+                .environmentObject(app.updater)
                 .frame(minWidth: 1000, minHeight: 720)
                 .preferredColorScheme(.dark)
         }
     }
 }
+
+let brandPurple = Color(red: 0.62, green: 0.32, blue: 0.95)
 
 struct RootView: View {
     @EnvironmentObject var app: AppState
@@ -60,12 +63,13 @@ extension AppTab {
 
 struct MainView: View {
     @State var tab: AppTab = .calendar
+    @EnvironmentObject var updater: Updater
 
     var body: some View {
         NavigationSplitView {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 0) {
-                    Text("SUMMIT").font(.system(size: 22, weight: .heavy)).italic()
+                    Text("SUMMIT").font(.system(size: 22, weight: .heavy)).italic().foregroundColor(brandPurple)
                     Text("ROAD").font(.system(size: 22, weight: .light)).italic()
                 }
                 .padding(.horizontal, 20).padding(.vertical, 22)
@@ -75,6 +79,14 @@ struct MainView: View {
                 Divider()
                 ForEach(AppTab.footerTabs) { navRow($0, big: false) }
                     .padding(.bottom, 2)
+                if let u = updater.available {
+                    Button { tab = .settings } label: {
+                        Label("Update available: v\(u.version)", systemImage: "arrow.down.circle.fill")
+                            .font(.caption.bold()).foregroundColor(brandPurple)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 20).padding(.top, 8)
+                }
                 Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev")")
                     .font(.caption2).foregroundColor(.gray)
                     .padding(.horizontal, 20).padding(.vertical, 8)
@@ -99,7 +111,7 @@ extension MainView {
     func navRow(_ t: AppTab, big: Bool) -> some View {
         Button { tab = t } label: {
             HStack(spacing: 0) {
-                Rectangle().fill(tab == t ? Color.red : Color.clear).frame(width: 4)
+                Rectangle().fill(tab == t ? brandPurple : Color.clear).frame(width: 4)
                 Label(t.rawValue, systemImage: t.icon)
                     .font(.system(size: big ? 16 : 13, weight: big ? .semibold : .regular))
                     .foregroundColor(big || tab == t ? .primary : .gray)

@@ -651,6 +651,7 @@ struct DevicesView: View {
 struct SettingsView: View {
     @EnvironmentObject var store: Store
     @EnvironmentObject var strava: StravaClient
+    @EnvironmentObject var updater: Updater
     @State private var ftpText = ""
     @State private var secret = ""
     @State private var confirmDelete = false
@@ -697,6 +698,25 @@ struct SettingsView: View {
                         }
                         Toggle("Automatically upload rides when finished", isOn: $store.profile.autoUpload)
                         if !strava.status.isEmpty { Text(strava.status).font(.caption).foregroundColor(.gray) }
+                    }
+                }
+
+                Card {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Software Update").font(.headline)
+                        Text("Installed version: v\(Updater.currentVersion)").foregroundColor(.gray)
+                        HStack {
+                            Button("Check for Updates") { Task { await updater.check() } }
+                                .disabled(updater.busy)
+                            if let u = updater.available {
+                                Button("Install v\(u.version) and Restart") { Task { await updater.install() } }
+                                    .buttonStyle(.borderedProminent).tint(brandPurple)
+                                    .disabled(updater.busy)
+                                Link("Release notes", destination: u.pageURL)
+                            }
+                            if updater.busy { ProgressView().controlSize(.small) }
+                        }
+                        if !updater.status.isEmpty { Text(updater.status).font(.caption).foregroundColor(.gray) }
                     }
                 }
 

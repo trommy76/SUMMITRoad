@@ -69,6 +69,7 @@ final class AppState: ObservableObject {
     let store = Store()
     let ble = BLEManager()
     let strava = StravaClient()
+    let updater = Updater()
 
     @Published var session: RideSession?
     @Published var review: RideSummary?
@@ -77,6 +78,10 @@ final class AppState: ObservableObject {
     init() {
         ble.onRememberTrainer = { [weak self] id in self?.store.profile.trainerID = id.uuidString }
         ble.onRememberHR = { [weak self] id in self?.store.profile.hrID = id.uuidString }
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            await self?.updater.check(silent: true)
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             guard let self = self else { return }
             self.ble.reconnectKnown(trainerID: self.store.profile.trainerID, hrID: self.store.profile.hrID)

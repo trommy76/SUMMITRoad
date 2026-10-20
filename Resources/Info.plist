@@ -5,6 +5,7 @@
     <key>CFBundleName</key><string>SummitRoad</string>
     <key>CFBundleDisplayName</key><string>SummitRoad</string>
     <key>CFBundleIdentifier</key><string>com.example.SummitTrainer</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundleExecutable</key><string>SummitTrainer</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>1.0</string>
