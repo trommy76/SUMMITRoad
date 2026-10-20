@@ -53,12 +53,32 @@ docker exec -it summitroad python server.py users                   # list users
 The password in `docker-compose.yml` is only used to create the admin the first time. Changing it later does not
 change the stored password; use the dashboard or the command above.
 
+## Exposing it to the internet (Cloudflare in front)
+
+The server itself only speaks HTTP, so never publish port 8787 directly. Put HTTPS in front of it:
+
+- **Cloudflare Tunnel (recommended):** run `cloudflared` on the same Docker network and point the tunnel's public
+  hostname at `http://summitroad:8787`. Nothing is opened on your router.
+- Keep `SUMMITROAD_TRUST_PROXY: "1"` in the compose file so login throttling sees each visitor's real IP
+  (from Cloudflare's `CF-Connecting-IP` header). Only use it when the server is reachable **only** through the proxy,
+  because otherwise a client could fake that header.
+- In the app, enter the address as `https://summitroad.yourdomain.com` in Settings > Home Server.
+- Optional extras in Cloudflare: a WAF rate-limiting rule on `/api/*`, and "Always Use HTTPS" + HSTS.
+
+Built-in protections: 10 failed logins per client IP (or 30 per username) in 10 minutes returns HTTP 429 for a while;
+writes must carry an `X-Requested-With: SummitRoad` header (blocks forged cross-site requests; the app and dashboard
+send it); new passwords must be at least 10 characters; security headers and a content-security policy are set;
+slow connections time out; and the container drops from root to an unprivileged user after fixing the data volume's
+permissions. Failed logins are written to the container log as `AUTH FAIL ip=... user=...` if you want fail2ban.
+
+Note: someone who deliberately fails 30 logins for your username locks that username out for 10 minutes.
+
 ## Security notes
 
 - The server speaks plain HTTP, so keep it on your home network. If you ever expose it, put it behind a
   reverse proxy that adds HTTPS.
 - Passwords are stored as salted PBKDF2 hashes. Change the example password in `docker-compose.yml` before
-  first start.
+  first start. Writes need an `X-Requested-With: SummitRoad` header, so use app version 1.0.21 or newer with server 1.1.2+.
 - API: `GET/PUT /api/rides/<id>` (+ `/fit`), `DELETE /api/rides/<id>`, `GET/PUT /api/ftp/<id>`, `GET /api/ping`,
   `POST /api/password`, and admin-only `GET/POST /api/users`, `POST /api/users/<name>/password`, `DELETE /api/users/<name>`.
   All use HTTP Basic auth.

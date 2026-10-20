@@ -9,6 +9,8 @@ services:
       # Creates this user on first start (ignored if the user already exists).
       SUMMITROAD_USER: "admin"
       SUMMITROAD_PASSWORD: "change-me"
+      # Set to "1" when Cloudflare / a reverse proxy sits in front, so login throttling sees the real client IP.
+      SUMMITROAD_TRUST_PROXY: "1"
     volumes:
       - summitroad-data:/data
 

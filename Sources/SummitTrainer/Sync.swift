@@ -73,6 +73,7 @@ final class SyncClient: ObservableObject {
         var req = URLRequest(url: base.appendingPathComponent(path))
         req.httpMethod = method
         req.setValue(header, forHTTPHeaderField: "Authorization")
+        req.setValue("SummitRoad", forHTTPHeaderField: "X-Requested-With")   // required by the server for writes
         req.timeoutInterval = 30
         if let b = body {
             req.httpBody = b

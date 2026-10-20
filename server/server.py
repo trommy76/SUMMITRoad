@@ -20,7 +20,12 @@ def _read_version():
 
 VERSION = _read_version()
 USER_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
-MIN_PW = 6
+MIN_PW = 10
+TRUST_PROXY = os.environ.get("SUMMITROAD_TRUST_PROXY", "0") == "1"   # take the client IP from Cloudflare / proxy headers
+FAIL_WINDOW = 600          # seconds
+MAX_FAILS_IP = 10          # failed logins per client IP within the window
+MAX_FAILS_USER = 30        # failed logins per username within the window (all IPs)
+RUN_UID = 10001
 DATA_DIR = os.environ.get("SUMMITROAD_DATA", "/data")
 PORT = int(os.environ.get("SUMMITROAD_PORT", "8787"))
 MAX_BODY = 64 * 1024 * 1024
@@ -100,6 +105,47 @@ def check_login(username, password):
     return ok
 
 
+_fails = {}
+_fails_lock = threading.Lock()
+
+
+def _recent(key):
+    now = time.time()
+    lst = [t for t in _fails.get(key, []) if now - t < FAIL_WINDOW]
+    if lst:
+        _fails[key] = lst
+    else:
+        _fails.pop(key, None)
+    return lst
+
+
+def throttled(ip, username):
+    with _fails_lock:
+        return len(_recent(("ip", ip))) >= MAX_FAILS_IP or len(_recent(("user", username))) >= MAX_FAILS_USER
+
+
+def record_fail(ip, username):
+    with _fails_lock:
+        for key in (("ip", ip), ("user", username)):
+            _recent(key)
+            _fails.setdefault(key, []).append(time.time())
+
+
+def drop_privileges():
+    """Started as root so an existing data volume can be handed to the unprivileged user, then run as that user."""
+    if os.getuid() != 0:
+        return
+    for root, _dirs, files in os.walk(DATA_DIR):
+        for n in [root] + [os.path.join(root, f) for f in files]:
+            try:
+                os.chown(n, RUN_UID, RUN_UID)
+            except OSError:
+                pass
+    os.setgroups([])
+    os.setgid(RUN_UID)
+    os.setuid(RUN_UID)
+
+
 def ride_summary(row):
     if row["deleted"]:
         return {"id": row["id"], "deleted": True}
@@ -111,8 +157,20 @@ def ride_summary(row):
     return d
 
 
+CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+       "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+
+
 class Handler(BaseHTTPRequestHandler):
-    server_version = "SummitRoad/" + VERSION
+    server_version = "SummitRoad"
+    timeout = 30          # drop slow or stalled connections
+
+    def client_ip(self):
+        if TRUST_PROXY:
+            ip = self.headers.get("CF-Connecting-IP") or (self.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+            if ip:
+                return ip
+        return self.client_address[0]
 
     def log_message(self, fmt, *args):
         sys.stderr.write("%s %s\n" % (self.address_string(), fmt % args))
@@ -127,6 +185,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        if ctype.startswith("text/html"):
+            self.send_header("Content-Security-Policy", CSP)
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers()
@@ -134,20 +197,34 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def user(self):
+        # State-changing requests must carry a custom header. A web page on another site cannot add it without
+        # a CORS preflight, which this server never allows, so forged cross-site requests are rejected.
+        if self.command in ("POST", "PUT", "DELETE") and self.headers.get("X-Requested-With") != "SummitRoad":
+            self.send(403, {"error": "missing X-Requested-With header"})
+            return None
+        ip = self.client_ip()
         h = self.headers.get("Authorization", "")
         if h.startswith("Basic "):
             try:
                 u, _, p = base64.b64decode(h[6:]).decode().partition(":")
+                if throttled(ip, u):
+                    self.send(429, {"error": "too many failed logins, try again later"}, extra={"Retry-After": "300"})
+                    return None
                 if check_login(u, p):
                     return u
+                record_fail(ip, u)
+                sys.stderr.write("AUTH FAIL ip=%s user=%r\n" % (ip, u[:40]))
             except Exception:
                 pass
         self.send(401, {"error": "login required"}, extra={"WWW-Authenticate": 'Basic realm="SummitRoad", charset="UTF-8"'})
         return None
 
     def body(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        if n > MAX_BODY:
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return None
+        if n < 0 or n > MAX_BODY:
             return None
         return self.rfile.read(n)
 
@@ -345,12 +422,12 @@ input[type=text],input[type=password]{background:#111114;color:var(--fg);border:
 <div class="card" id="detail"><div style="display:flex;justify-content:space-between"><h2 id="dtitle"></h2><button onclick="document.getElementById('detail').style.display='none'">Close</button></div>
 <div id="dmeta" class="muted"></div><div id="dchart"></div><ul class="fb" id="dfb"></ul><div id="dlinks"></div></div>
 <div class="card" style="margin-top:20px"><h2>Account</h2>
-<div class="row"><input type="password" id="pwold" placeholder="Current password"><input type="password" id="pwnew" placeholder="New password (min 6)"><input type="password" id="pwnew2" placeholder="Repeat new password"><button onclick="changePw()">Change password</button></div>
+<div class="row"><input type="password" id="pwold" placeholder="Current password"><input type="password" id="pwnew" placeholder="New password (min 10)"><input type="password" id="pwnew2" placeholder="Repeat new password"><button onclick="changePw()">Change password</button></div>
 <div id="pwmsg" class="msg"></div></div>
 <div class="card" id="usersCard" style="margin-top:20px;display:none"><h2>Users (admin)</h2>
 <div class="scroll"><table><thead><tr><th>User</th><th>Role</th><th>Rides</th><th></th></tr></thead><tbody id="users"></tbody></table></div>
 <h2 style="margin-top:16px">Add a user</h2>
-<div class="row"><input type="text" id="nuname" placeholder="Username"><input type="password" id="nupw" placeholder="Password (min 6)"><label class="muted" style="margin-right:10px"><input type="checkbox" id="nuadmin"> admin</label><button onclick="addUser()">Add user</button></div>
+<div class="row"><input type="text" id="nuname" placeholder="Username"><input type="password" id="nupw" placeholder="Password (min 10)"><label class="muted" style="margin-right:10px"><input type="checkbox" id="nuadmin"> admin</label><button onclick="addUser()">Add user</button></div>
 <div id="umsg" class="msg"></div></div>
 <div class="card" style="margin-top:20px"><h2>Rides</h2><div class="scroll"><table><thead><tr>
 <th>Date</th><th>Workout</th><th>Time</th><th>Avg W</th><th>NP</th><th>TSS</th><th>HR</th><th>Score</th></tr></thead><tbody id="rows"></tbody></table></div></div>
@@ -363,7 +440,7 @@ const fmtD=d=>new Date(d).toLocaleDateString(undefined,{year:'numeric',month:'sh
 function line(pts,w,h,color,pad){ // pts: [[x,y]] already scaled to 0..1
   return '<polyline fill="none" stroke="'+color+'" stroke-width="2" points="'+pts.map(p=>(pad+p[0]*(w-2*pad)).toFixed(1)+','+(h-pad-p[1]*(h-2*pad)).toFixed(1)).join(' ')+'"/>'}
 async function api(p){const r=await fetch(location.origin+p);if(!r.ok)throw new Error(p+' '+r.status);return r.json()}
-async function call(method,p,body){const r=await fetch(location.origin+p,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+async function call(method,p,body){const r=await fetch(location.origin+p,{method,headers:{'Content-Type':'application/json','X-Requested-With':'SummitRoad'},body:body?JSON.stringify(body):undefined});
   let j={};try{j=await r.json()}catch(e){}if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j}
 function say(id,text,good){const e=$(id);e.textContent=text;e.className='msg '+(good?'ok':'err')}
 async function changePw(){
@@ -382,7 +459,7 @@ async function addUser(){
     $('nuname').value=$('nupw').value='';$('nuadmin').checked=false;say('umsg','User added.',true);loadUsers()}
   catch(e){say('umsg',e.message)}}
 async function resetPw(name){
-  const n=prompt('New password for '+name+' (min 6 characters):');if(!n)return;
+  const n=prompt('New password for '+name+' (min 10 characters):');if(!n)return;
   try{await call('POST','/api/users/'+encodeURIComponent(name)+'/password',{new:n});say('umsg','Password reset for '+name+'.',true)}
   catch(e){say('umsg',e.message)}}
 async function delUser(name){
@@ -462,7 +539,9 @@ def main():
         if c.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
             print("WARNING: no users exist. Set SUMMITROAD_USER and SUMMITROAD_PASSWORD, or run: "
                   "docker exec -it summitroad python server.py adduser NAME --admin")
-    print("SummitRoad server %s listening on :%d (data: %s)" % (VERSION, PORT, DATA_DIR))
+    drop_privileges()
+    print("SummitRoad server %s listening on :%d (data: %s, uid %d, trust proxy: %s)"
+          % (VERSION, PORT, DATA_DIR, os.getuid(), TRUST_PROXY))
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
 
