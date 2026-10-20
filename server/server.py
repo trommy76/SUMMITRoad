@@ -26,6 +26,7 @@ FAIL_WINDOW = 600          # seconds
 MAX_FAILS_IP = 10          # failed logins per client IP within the window
 MAX_FAILS_USER = 30        # failed logins per username within the window (all IPs)
 RUN_UID = 10001
+DOC_NAMES = ("plan", "settings")   # small synced documents: newest change wins
 LOG_KEEP_DAYS = 90         # activity log retention
 LOG_MAX_ROWS = 20000
 DATA_DIR = os.environ.get("SUMMITROAD_DATA", "/data")
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS rides (
   user TEXT, id TEXT, date TEXT, data TEXT, deleted INTEGER DEFAULT 0, updated REAL, fit BLOB,
   PRIMARY KEY (user, id));
 CREATE TABLE IF NOT EXISTS ftp (user TEXT, id TEXT, date TEXT, ftp REAL, method TEXT, PRIMARY KEY (user, id));
+CREATE TABLE IF NOT EXISTS docs (user TEXT, name TEXT, data TEXT, updated REAL, deleted INTEGER DEFAULT 0, PRIMARY KEY (user, name));
 CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, user TEXT, ip TEXT, client TEXT, type TEXT, detail TEXT);
 CREATE INDEX IF NOT EXISTS events_user ON events (user, id);
 """
@@ -318,6 +320,12 @@ class Handler(BaseHTTPRequestHandler):
                         return self.send(404, {"error": "no fit file"})
                     return self.send(200, bytes(row["fit"]), "application/octet-stream",
                                      {"Content-Disposition": 'attachment; filename="%s.fit"' % row["id"]})
+            if len(parts) == 2 and parts[0] == "docs" and parts[1] in DOC_NAMES:
+                row = c.execute("SELECT data, updated, deleted FROM docs WHERE user=? AND name=?", (u, parts[1])).fetchone()
+                if not row:
+                    return self.send(404, {"error": "none"})
+                return self.send(200, {"updated": row["updated"], "deleted": bool(row["deleted"]),
+                                       "data": json.loads(row["data"]) if row["data"] else None})
             if parts == ["log"]:
                 q = parse_qs(urlparse(self.path).query)
                 try:
@@ -350,6 +358,23 @@ class Handler(BaseHTTPRequestHandler):
         data = self.body()
         if data is None:
             return self.send(413, {"error": "too large"})
+        if len(parts) == 3 and parts[:2] == ["api", "docs"] and parts[2] in DOC_NAMES:
+            try:
+                obj = json.loads(data)
+                updated = float(obj["updated"])
+                deleted = bool(obj.get("deleted"))
+                payload = json.dumps(obj.get("data"))
+            except Exception as e:
+                return self.send(400, {"error": "bad document: %s" % e})
+            with db() as c:
+                row = c.execute("SELECT updated FROM docs WHERE user=? AND name=?", (u, parts[2])).fetchone()
+                if row and row["updated"] >= updated:        # the stored copy is newer (or identical): keep it
+                    return self.send(200, {"applied": False, "updated": row["updated"]})
+                c.execute("INSERT INTO docs (user, name, data, updated, deleted) VALUES (?,?,?,?,?) "
+                          "ON CONFLICT(user, name) DO UPDATE SET data=excluded.data, updated=excluded.updated, deleted=excluded.deleted",
+                          (u, parts[2], payload, updated, 1 if deleted else 0))
+            self.ev(u, "plan_cleared" if (parts[2] == "plan" and deleted) else parts[2] + "_updated")
+            return self.send(200, {"applied": True, "updated": updated})
         if len(parts) < 3 or parts[0] != "api" or not UUID_RE.match(parts[2]):
             return self.send(404, {"error": "not found"})
         rid = parts[2].upper()
@@ -452,6 +477,7 @@ class Handler(BaseHTTPRequestHandler):
             with db() as c:
                 c.execute("DELETE FROM rides WHERE user=?", (name,))
                 c.execute("DELETE FROM ftp WHERE user=?", (name,))
+                c.execute("DELETE FROM docs WHERE user=?", (name,))
                 cur = c.execute("DELETE FROM users WHERE username=?", (name,))
             forget_logins()
             if cur.rowcount:
@@ -554,7 +580,7 @@ async function delUser(name){
   try{await call('DELETE','/api/users/'+encodeURIComponent(name));say('umsg','Deleted '+name+'.',true);loadUsers()}
   catch(e){say('umsg',e.message)}}
 let me='';
-const EV={login:'Signed in',login_failed:'Failed sign-in',throttled:'Blocked (too many failures)',sync:'App synced',dashboard_view:'Viewed dashboard',ride_added:'Ride uploaded',ride_updated:'Ride updated',ride_deleted:'Ride deleted',ftp_added:'FTP result added',password_changed:'Password changed',password_change_failed:'Password change failed',password_reset:'Password reset',user_added:'User added',user_deleted:'User deleted'};
+const EV={login:'Signed in',login_failed:'Failed sign-in',throttled:'Blocked (too many failures)',sync:'App synced',dashboard_view:'Viewed dashboard',ride_added:'Ride uploaded',ride_updated:'Ride updated',ride_deleted:'Ride deleted',plan_updated:'Training plan synced',plan_cleared:'Training plan cleared',settings_updated:'Settings synced',ftp_added:'FTP result added',password_changed:'Password changed',password_change_failed:'Password change failed',password_reset:'Password reset',user_added:'User added',user_deleted:'User deleted'};
 async function loadLog(){
   const sel=$('logUser');const who=sel.style.display==='none'?'':sel.value;
   const rows=await api('/api/log?limit=200'+(who?'&user='+encodeURIComponent(who):''));

@@ -3,14 +3,31 @@ import SwiftUI
 
 @MainActor
 final class Store: ObservableObject {
-    @Published var profile = Profile() { didSet { write(profile, "profile.json") } }
-    @Published var plan: TrainingPlan? { didSet { if let p = plan { write(p, "plan.json") } else { remove("plan.json") } } }
+    @Published var profile = Profile() { didSet {
+        if !loading && !applyingRemote && (oldValue.maxHR != profile.maxHR || oldValue.voiceCues != profile.voiceCues
+                                          || oldValue.autoUpload != profile.autoUpload) {
+            profile.settingsUpdatedAt = Date().timeIntervalSince1970
+            onSettingsChanged?()
+        }
+        write(profile, "profile.json")
+    } }
+    @Published var plan: TrainingPlan? { didSet {
+        if !loading && !applyingRemote {
+            profile.planUpdatedAt = Date().timeIntervalSince1970
+            onPlanChanged?()
+        }
+        if let p = plan { write(p, "plan.json") } else { remove("plan.json") }
+    } }
     @Published var rides: [RideSummary] = []
 
     /// Hooks used by the optional home-server sync.
     var onRideSaved: ((RideSummary) -> Void)?
     var onRideDeleted: ((UUID) -> Void)?
     var onFTPAdded: ((FTPEntry) -> Void)?
+    var onPlanChanged: (() -> Void)?
+    var onSettingsChanged: (() -> Void)?
+    private var loading = true            // true while loading from disk, so that does not count as a change
+    var applyingRemote = false            // true while applying plan/settings that came from the server
 
     let dir: URL
     private let encoder: JSONEncoder = {
@@ -41,6 +58,31 @@ final class Store: ObservableObject {
                 .compactMap { try? decoder.decode(RideSummary.self, from: Data(contentsOf: $0)) }
                 .sorted { $0.date > $1.date }
         }
+        loading = false
+    }
+
+    /// When the plan last changed. Plans saved before sync existed use the file's modification time.
+    var planTimestamp: Double {
+        if let t = profile.planUpdatedAt { return t }
+        guard plan != nil else { return 0 }
+        let attrs = try? FileManager.default.attributesOfItem(atPath: dir.appendingPathComponent("plan.json").path)
+        return (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+    }
+
+    func applyRemote(plan newPlan: TrainingPlan?, updated: Double) {
+        applyingRemote = true
+        plan = newPlan
+        profile.planUpdatedAt = updated
+        applyingRemote = false
+    }
+
+    func applyRemote(maxHR: Int, voiceCues: Bool, autoUpload: Bool, updated: Double) {
+        applyingRemote = true
+        profile.maxHR = maxHR
+        profile.voiceCues = voiceCues
+        profile.autoUpload = autoUpload
+        profile.settingsUpdatedAt = updated
+        applyingRemote = false
     }
 
     private func write<T: Encodable>(_ v: T, _ name: String) {
@@ -99,6 +141,8 @@ final class AppState: ObservableObject {
         store.onRideSaved = { [weak self] r in self?.sync.rideSaved(r) }
         store.onRideDeleted = { [weak self] id in self?.sync.rideDeleted(id) }
         store.onFTPAdded = { [weak self] e in self?.sync.ftpAdded(e) }
+        store.onPlanChanged = { [weak self] in self?.sync.planChanged() }
+        store.onSettingsChanged = { [weak self] in self?.sync.settingsChanged() }
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             await self?.updater.check(silent: true)

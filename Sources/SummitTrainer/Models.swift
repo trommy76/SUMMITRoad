@@ -246,6 +246,8 @@ struct Profile: Codable {
     var syncURL: String?
     var syncUser: String?
     var syncUploadOK: Bool?
+    var planUpdatedAt: Double?        // epoch seconds of the last local plan change (used to sync the plan)
+    var settingsUpdatedAt: Double?    // same, for maxHR / voice cues / auto-upload
 }
 
 // MARK: - Metrics

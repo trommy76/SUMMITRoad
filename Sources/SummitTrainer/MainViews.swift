@@ -709,7 +709,7 @@ struct SettingsView: View {
                 Card {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Home Server (optional)").font(.headline)
-                        Text("Keep your rides, FTP history and .FIT files on your own SummitRoad server (Docker, on your home network) so other machines see them and you can browse them in a browser. Leave this blank to keep everything only on this Mac.")
+                        Text("Keep your rides, FTP history, training plan, settings and .FIT files on your own SummitRoad server (Docker, on your home network) so other machines see them and you can browse them in a browser. Leave this blank to keep everything only on this Mac.")
                             .font(.callout).foregroundColor(.gray)
                         HStack {
                             TextField("Server address, e.g. 192.168.1.20:8787", text: $syncURL).frame(width: 280)
@@ -788,7 +788,7 @@ struct SettingsView: View {
                 Task { await sync.syncAll(upload: false, download: true) }
             }
         } message: {
-            Text("Copy your \(store.rides.count) saved rides, their .FIT files and your FTP history to this server profile? Anything already on the server is downloaded here too. You can upload later with Sync Now.")
+            Text("Copy your \(store.rides.count) saved rides, their .FIT files, FTP history, training plan and settings to this server profile? Anything already on the server is downloaded here too, and for the plan and settings the most recent change wins. You can upload later with Sync Now.")
         }
         .alert("Are you sure you want to delete your training plan?", isPresented: $confirmDelete) {
             Button("Cancel", role: .cancel) {}

@@ -23,9 +23,13 @@ To build it yourself instead, run `docker build -t summitroad-server server` and
 ## In the app
 
 Settings > Home Server: enter the address (for example `192.168.1.20:8787`), your username and password, and click
-Connect. The app offers to upload your existing rides and FTP history to that profile. After that:
+Connect. The app offers to upload your existing rides, FTP history, training plan and settings to that profile.
+After that:
 
 - new rides, deleted rides and FTP results sync automatically,
+- your **training plan** (including completed workouts) and settings (max heart rate, voice cues, auto-upload to
+  Strava) sync too: the most recent change wins, so edit on whichever Mac you like. Trainer/strap pairings and the
+  Strava login stay per Mac,
 - the app downloads anything new from the server each time it starts,
 - **Sync Now** does a full two-way sync.
 

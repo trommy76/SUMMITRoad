@@ -10,6 +10,7 @@ final class SyncClient: ObservableObject {
     @Published var serverVersion: String?
 
     private let store: Store
+    private var settingsPush: Task<Void, Never>?
     private let passwordKey = "sync.password"
 
     private let encoder: JSONEncoder = {
@@ -138,6 +139,20 @@ final class SyncClient: ObservableObject {
     }
 
     /// Runs shortly after launch. Always downloads; uploads only if the user has agreed to upload their data.
+    func planChanged() {
+        guard configured else { return }
+        Task { await pushPlan() }
+    }
+
+    func settingsChanged() {
+        guard configured else { return }
+        settingsPush?.cancel()
+        settingsPush = Task {                       // wait a moment so dragging a stepper sends one update
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            if !Task.isCancelled { await pushSettings() }
+        }
+    }
+
     func autoSync() async {
         guard configured else { return }
         await refreshServerVersion()
@@ -223,6 +238,7 @@ final class SyncClient: ObservableObject {
             }
 
             try await syncFTP(upload: upload, download: download, up: &up, down: &down)
+            await syncDocs(upload: upload, download: download)
             lastSync = Date()
             var parts: [String] = []
             if up > 0 { parts.append("uploaded \(up)") }
@@ -231,6 +247,97 @@ final class SyncClient: ObservableObject {
             if failed > 0 { parts.append("\(failed) failed") }
             if !quiet || !parts.isEmpty || failed > 0 {
                 status = "Sync complete: " + (parts.isEmpty ? "everything is up to date." : parts.joined(separator: ", ") + ".")
+            }
+        } catch {
+            status = "Sync failed: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: Plan and settings (one small document each; the newest change wins)
+
+    struct SettingsDoc: Codable {
+        var maxHR: Int
+        var voiceCues: Bool
+        var autoUpload: Bool
+    }
+    private struct DocIn<T: Decodable>: Decodable {
+        let updated: Double
+        let deleted: Bool?
+        let data: T?
+    }
+    private struct DocOut<T: Encodable>: Encodable {
+        let updated: Double
+        let deleted: Bool
+        let data: T?
+    }
+    private struct PutResult: Decodable { let applied: Bool }
+
+    private func fetchDoc<T: Decodable>(_ name: String, as: T.Type) async throws -> DocIn<T>? {
+        let (d, code) = try await send("GET", "api/docs/\(name)")
+        if code == 404 { return nil }
+        guard code == 200 else { throw SyncError.http(code) }
+        return try decoder.decode(DocIn<T>.self, from: d)
+    }
+
+    private func putDoc<T: Encodable>(_ name: String, updated: Double, deleted: Bool, data: T?) async throws -> Bool {
+        let (d, code) = try await send("PUT", "api/docs/\(name)", body: try encoder.encode(DocOut(updated: updated, deleted: deleted, data: data)))
+        guard (200..<300).contains(code) else { throw SyncError.http(code) }
+        return (try? decoder.decode(PutResult.self, from: d))?.applied ?? true
+    }
+
+    private var currentSettings: SettingsDoc {
+        SettingsDoc(maxHR: store.profile.maxHR, voiceCues: store.profile.voiceCues, autoUpload: store.profile.autoUpload)
+    }
+
+    private func pushPlan() async {
+        do {
+            let ts = store.planTimestamp
+            if try await !putDoc("plan", updated: ts, deleted: store.plan == nil, data: store.plan) {
+                await syncDocs(upload: false, download: true)       // the server has a newer plan
+            }
+        } catch { status = "Sync failed: \(error.localizedDescription)" }
+    }
+
+    private func pushSettings() async {
+        do {
+            let ts = store.profile.settingsUpdatedAt ?? Date().timeIntervalSince1970
+            if try await !putDoc("settings", updated: ts, deleted: false, data: currentSettings) {
+                await syncDocs(upload: false, download: true)
+            }
+        } catch { status = "Sync failed: \(error.localizedDescription)" }
+    }
+
+    /// `upload` also sends plan/settings that predate sync and have never been changed since.
+    private func syncDocs(upload: Bool, download: Bool) async {
+        do {
+            // Plan
+            let localPlan = store.planTimestamp
+            let userMadePlan = store.profile.planUpdatedAt != nil
+            if let r = try await fetchDoc("plan", as: TrainingPlan.self) {
+                if r.updated > localPlan {
+                    if download { store.applyRemote(plan: r.deleted == true ? nil : r.data, updated: r.updated) }
+                } else if localPlan > r.updated && (userMadePlan || upload) {
+                    _ = try await putDoc("plan", updated: localPlan, deleted: store.plan == nil, data: store.plan)
+                }
+            } else if store.plan != nil && (userMadePlan || upload) {
+                _ = try await putDoc("plan", updated: localPlan, deleted: false, data: store.plan)
+            }
+
+            // Settings
+            let localSettings = store.profile.settingsUpdatedAt ?? 0
+            if let r = try await fetchDoc("settings", as: SettingsDoc.self) {
+                if r.updated > localSettings {
+                    if download, let s = r.data {
+                        store.applyRemote(maxHR: s.maxHR, voiceCues: s.voiceCues, autoUpload: s.autoUpload, updated: r.updated)
+                    }
+                } else if localSettings > r.updated {
+                    _ = try await putDoc("settings", updated: localSettings, deleted: false, data: currentSettings)
+                }
+            } else if localSettings > 0 || upload {
+                let ts = localSettings > 0 ? localSettings : Date().timeIntervalSince1970
+                _ = try await putDoc("settings", updated: ts, deleted: false, data: currentSettings)
+                store.applyRemote(maxHR: store.profile.maxHR, voiceCues: store.profile.voiceCues,
+                                  autoUpload: store.profile.autoUpload, updated: ts)
             }
         } catch {
             status = "Sync failed: \(error.localizedDescription)"
