@@ -31,16 +31,27 @@ Connect. The app offers to upload your existing rides and FTP history to that pr
 
 macOS only allows plain `http://` to local addresses: use an IP address, a `.local` name or a name without dots.
 
-## More users (separate profiles)
+## Users and passwords
 
-Each user has their own login and their own data; nobody sees anyone else's rides.
+The user in `docker-compose.yml` (`SUMMITROAD_USER`) is the **admin**. Sign in to the dashboard in a browser:
+
+- **Everyone** can change their own password in the Account box.
+- **The admin** also sees a Users box to add users (optionally as admins), reset anyone's password, and delete a
+  user (this removes all of that user's rides and FTP history).
+- Each user has their own login and their own data; nobody sees anyone else's rides.
+
+If you change your password, the SummitRoad app needs the new one: Settings > Home Server > Update Login.
+
+Command-line alternative (also how to recover a forgotten admin password):
 
 ```bash
-docker exec -it summitroad python server.py adduser anna      # prompts for a password
-docker exec -it summitroad python server.py users             # list users
+docker exec -it summitroad python server.py adduser anna            # new user, prompts for a password
+docker exec -it summitroad python server.py adduser kevin --admin   # reset a password / make an admin
+docker exec -it summitroad python server.py users                   # list users
 ```
 
-Running `adduser` for an existing name resets that user's password.
+The password in `docker-compose.yml` is only used to create the admin the first time. Changing it later does not
+change the stored password; use the dashboard or the command above.
 
 ## Security notes
 
@@ -48,5 +59,6 @@ Running `adduser` for an existing name resets that user's password.
   reverse proxy that adds HTTPS.
 - Passwords are stored as salted PBKDF2 hashes. Change the example password in `docker-compose.yml` before
   first start.
-- API: `GET/PUT /api/rides/<id>` (+ `/fit`), `DELETE /api/rides/<id>`, `GET/PUT /api/ftp/<id>`, `GET /api/ping`.
+- API: `GET/PUT /api/rides/<id>` (+ `/fit`), `DELETE /api/rides/<id>`, `GET/PUT /api/ftp/<id>`, `GET /api/ping`,
+  `POST /api/password`, and admin-only `GET/POST /api/users`, `POST /api/users/<name>/password`, `DELETE /api/users/<name>`.
   All use HTTP Basic auth.

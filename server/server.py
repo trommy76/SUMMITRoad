@@ -3,14 +3,16 @@
 
 Standard library only. Data lives in $SUMMITROAD_DATA (default /data).
   python server.py                      run the server
-  python server.py adduser NAME [PASS]  create or update a user (prompts for the password if omitted)
+  python server.py adduser NAME [PASS] [--admin]  create a user or reset their password (prompts if PASS omitted)
   python server.py users                list users
 """
 import base64, getpass, hashlib, hmac, json, os, re, secrets, sqlite3, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
+USER_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
+MIN_PW = 6
 DATA_DIR = os.environ.get("SUMMITROAD_DATA", "/data")
 PORT = int(os.environ.get("SUMMITROAD_PORT", "8787"))
 MAX_BODY = 64 * 1024 * 1024
@@ -36,18 +38,36 @@ def init_db():
     os.makedirs(DATA_DIR, exist_ok=True)
     with db() as c:
         c.executescript(SCHEMA)
+        cols = [r["name"] for r in c.execute("PRAGMA table_info(users)")]
+        if "admin" not in cols:
+            c.execute("ALTER TABLE users ADD COLUMN admin INTEGER DEFAULT 0")
 
 
 def hash_pw(password, salt):
     return hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 200_000)
 
 
-def set_user(username, password):
+def set_user(username, password, admin=None):
+    """Create a user or reset their password. `admin` None keeps the existing role (new users default to normal)."""
     salt = secrets.token_bytes(16)
     with db() as c:
-        c.execute("INSERT INTO users (username, salt, hash, created) VALUES (?,?,?,?) "
-                  "ON CONFLICT(username) DO UPDATE SET salt=excluded.salt, hash=excluded.hash",
-                  (username, salt, hash_pw(password, salt), time.time()))
+        c.execute("INSERT INTO users (username, salt, hash, created, admin) VALUES (?,?,?,?,?) "
+                  "ON CONFLICT(username) DO UPDATE SET salt=excluded.salt, hash=excluded.hash, "
+                  "admin=CASE WHEN ? IS NULL THEN admin ELSE ? END",
+                  (username, salt, hash_pw(password, salt), time.time(), 1 if admin else 0,
+                   None if admin is None else 1, 1 if admin else 0))
+    forget_logins()
+
+
+def is_admin(username):
+    with db() as c:
+        row = c.execute("SELECT admin FROM users WHERE username=?", (username,)).fetchone()
+    return bool(row and row["admin"])
+
+
+def forget_logins():
+    with _auth_lock:
+        _auth_cache.clear()
 
 
 _auth_cache = {}
@@ -143,7 +163,7 @@ class Handler(BaseHTTPRequestHandler):
         parts = parts[1:]
         with db() as c:
             if parts == ["ping"]:
-                return self.send(200, {"ok": True, "user": u, "server": VERSION})
+                return self.send(200, {"ok": True, "user": u, "server": VERSION, "admin": is_admin(u)})
             if parts == ["rides"]:
                 rows = c.execute("SELECT id, data, deleted, fit FROM rides WHERE user=? ORDER BY date DESC", (u,)).fetchall()
                 return self.send(200, [ride_summary(r) for r in rows])
@@ -160,6 +180,13 @@ class Handler(BaseHTTPRequestHandler):
                         return self.send(404, {"error": "no fit file"})
                     return self.send(200, bytes(row["fit"]), "application/octet-stream",
                                      {"Content-Disposition": 'attachment; filename="%s.fit"' % row["id"]})
+            if parts == ["users"]:
+                if not is_admin(u):
+                    return self.send(403, {"error": "admin only"})
+                rows = c.execute(
+                    "SELECT u.username, u.admin, (SELECT COUNT(*) FROM rides r WHERE r.user=u.username AND r.deleted=0) AS rides "
+                    "FROM users u ORDER BY u.username").fetchall()
+                return self.send(200, [{"username": r["username"], "admin": bool(r["admin"]), "rides": r["rides"]} for r in rows])
             if parts == ["ftp"]:
                 rows = c.execute("SELECT id, date, ftp, method FROM ftp WHERE user=? ORDER BY date", (u,)).fetchall()
                 return self.send(200, [dict(r) for r in rows])
@@ -208,11 +235,68 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, {"ok": True})
         self.send(404, {"error": "not found"})
 
+    def do_POST(self):
+        parts = self.route()
+        u = self.user()
+        if not u:
+            return
+        raw = self.body()
+        if raw is None:
+            return self.send(413, {"error": "too large"})
+        try:
+            obj = json.loads(raw or b"{}")
+        except ValueError:
+            return self.send(400, {"error": "bad json"})
+        if parts == ["api", "password"]:                       # change your own password
+            old, new = str(obj.get("old", "")), str(obj.get("new", ""))
+            if not check_login(u, old):
+                return self.send(403, {"error": "current password is wrong"})
+            if len(new) < MIN_PW:
+                return self.send(400, {"error": "new password must be at least %d characters" % MIN_PW})
+            set_user(u, new)
+            return self.send(200, {"ok": True})
+        if parts[:2] == ["api", "users"]:
+            if not is_admin(u):
+                return self.send(403, {"error": "admin only"})
+            if len(parts) == 2:                                # add a user
+                name, pw = str(obj.get("username", "")).strip(), str(obj.get("password", ""))
+                if not USER_RE.match(name):
+                    return self.send(400, {"error": "username: 1-32 letters, numbers, . _ -"})
+                if len(pw) < MIN_PW:
+                    return self.send(400, {"error": "password must be at least %d characters" % MIN_PW})
+                with db() as c:
+                    if c.execute("SELECT 1 FROM users WHERE username=?", (name,)).fetchone():
+                        return self.send(409, {"error": "that user already exists"})
+                set_user(name, pw, bool(obj.get("admin")))
+                return self.send(200, {"ok": True})
+            if len(parts) == 4 and parts[3] == "password":     # reset someone's password
+                name, pw = parts[2], str(obj.get("new", ""))
+                if len(pw) < MIN_PW:
+                    return self.send(400, {"error": "password must be at least %d characters" % MIN_PW})
+                with db() as c:
+                    if not c.execute("SELECT 1 FROM users WHERE username=?", (name,)).fetchone():
+                        return self.send(404, {"error": "no such user"})
+                set_user(name, pw)
+                return self.send(200, {"ok": True})
+        self.send(404, {"error": "not found"})
+
     def do_DELETE(self):
         parts = self.route()
         u = self.user()
         if not u:
             return
+        if len(parts) == 3 and parts[:2] == ["api", "users"]:   # remove a user and all their data
+            if not is_admin(u):
+                return self.send(403, {"error": "admin only"})
+            name = parts[2]
+            if name == u:
+                return self.send(400, {"error": "you cannot delete yourself"})
+            with db() as c:
+                c.execute("DELETE FROM rides WHERE user=?", (name,))
+                c.execute("DELETE FROM ftp WHERE user=?", (name,))
+                cur = c.execute("DELETE FROM users WHERE username=?", (name,))
+            forget_logins()
+            return self.send(200 if cur.rowcount else 404, {"ok": cur.rowcount > 0})
         if len(parts) == 3 and parts[:2] == ["api", "rides"] and UUID_RE.match(parts[2]):
             rid = parts[2].upper()
             with db() as c:
@@ -241,6 +325,8 @@ th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);white
 th{color:var(--mut);font-size:12px;text-transform:uppercase}tbody tr{cursor:pointer}tbody tr:hover{background:#25252b}
 .score{color:var(--green);font-weight:600}a{color:var(--accent)}svg{width:100%;height:auto;display:block}
 .muted{color:var(--mut)}.scroll{overflow-x:auto}#detail{display:none}
+input[type=text],input[type=password]{background:#111114;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:7px 10px;margin:0 6px 6px 0}
+.row{display:flex;flex-wrap:wrap;align-items:center}.msg{margin-top:6px;font-size:13px}.ok{color:var(--green)}.err{color:#e5484d}
 .fb li{margin:4px 0}button{background:#2c2c33;color:var(--fg);border:0;border-radius:6px;padding:6px 12px;cursor:pointer}
 </style></head><body>
 <header><div class="logo"><b>SUMMIT</b><span>ROAD</span></div><div class="muted" id="who"></div></header>
@@ -250,6 +336,14 @@ th{color:var(--mut);font-size:12px;text-transform:uppercase}tbody tr{cursor:poin
 <div class="card"><h2>Weekly TSS (last 12 weeks)</h2><div id="weekly"></div></div></div>
 <div class="card" id="detail"><div style="display:flex;justify-content:space-between"><h2 id="dtitle"></h2><button onclick="document.getElementById('detail').style.display='none'">Close</button></div>
 <div id="dmeta" class="muted"></div><div id="dchart"></div><ul class="fb" id="dfb"></ul><div id="dlinks"></div></div>
+<div class="card" style="margin-top:20px"><h2>Account</h2>
+<div class="row"><input type="password" id="pwold" placeholder="Current password"><input type="password" id="pwnew" placeholder="New password (min 6)"><input type="password" id="pwnew2" placeholder="Repeat new password"><button onclick="changePw()">Change password</button></div>
+<div id="pwmsg" class="msg"></div></div>
+<div class="card" id="usersCard" style="margin-top:20px;display:none"><h2>Users (admin)</h2>
+<div class="scroll"><table><thead><tr><th>User</th><th>Role</th><th>Rides</th><th></th></tr></thead><tbody id="users"></tbody></table></div>
+<h2 style="margin-top:16px">Add a user</h2>
+<div class="row"><input type="text" id="nuname" placeholder="Username"><input type="password" id="nupw" placeholder="Password (min 6)"><label class="muted" style="margin-right:10px"><input type="checkbox" id="nuadmin"> admin</label><button onclick="addUser()">Add user</button></div>
+<div id="umsg" class="msg"></div></div>
 <div class="card" style="margin-top:20px"><h2>Rides</h2><div class="scroll"><table><thead><tr>
 <th>Date</th><th>Workout</th><th>Time</th><th>Avg W</th><th>NP</th><th>TSS</th><th>HR</th><th>Score</th></tr></thead><tbody id="rows"></tbody></table></div></div>
 </main>
@@ -261,9 +355,36 @@ const fmtD=d=>new Date(d).toLocaleDateString(undefined,{year:'numeric',month:'sh
 function line(pts,w,h,color,pad){ // pts: [[x,y]] already scaled to 0..1
   return '<polyline fill="none" stroke="'+color+'" stroke-width="2" points="'+pts.map(p=>(pad+p[0]*(w-2*pad)).toFixed(1)+','+(h-pad-p[1]*(h-2*pad)).toFixed(1)).join(' ')+'"/>'}
 async function api(p){const r=await fetch(location.origin+p);if(!r.ok)throw new Error(p+' '+r.status);return r.json()}
+async function call(method,p,body){const r=await fetch(location.origin+p,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+  let j={};try{j=await r.json()}catch(e){}if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j}
+function say(id,text,good){const e=$(id);e.textContent=text;e.className='msg '+(good?'ok':'err')}
+async function changePw(){
+  const o=$('pwold').value,n=$('pwnew').value;
+  if(n!==$('pwnew2').value)return say('pwmsg','The new passwords do not match.');
+  try{await call('POST','/api/password',{old:o,new:n});['pwold','pwnew','pwnew2'].forEach(i=>$(i).value='');
+    say('pwmsg','Password changed. Your browser may ask you to sign in again, and the SummitRoad app needs the new password (Settings > Home Server > Update Login).',true)}
+  catch(e){say('pwmsg',e.message)}}
+async function loadUsers(){
+  const us=await api('/api/users');$('usersCard').style.display='block';
+  $('users').innerHTML=us.map(u=>'<tr style="cursor:default"><td>'+esc(u.username)+'</td><td>'+(u.admin?'admin':'user')+'</td><td>'+u.rides+'</td><td>'
+    +'<button data-u="'+esc(u.username)+'" onclick="resetPw(this.dataset.u)">Reset password</button> '
+    +(u.username===me?'':'<button data-u="'+esc(u.username)+'" onclick="delUser(this.dataset.u)">Delete</button>')+'</td></tr>').join('')}
+async function addUser(){
+  try{await call('POST','/api/users',{username:$('nuname').value,password:$('nupw').value,admin:$('nuadmin').checked});
+    $('nuname').value=$('nupw').value='';$('nuadmin').checked=false;say('umsg','User added.',true);loadUsers()}
+  catch(e){say('umsg',e.message)}}
+async function resetPw(name){
+  const n=prompt('New password for '+name+' (min 6 characters):');if(!n)return;
+  try{await call('POST','/api/users/'+encodeURIComponent(name)+'/password',{new:n});say('umsg','Password reset for '+name+'.',true)}
+  catch(e){say('umsg',e.message)}}
+async function delUser(name){
+  if(!confirm('Delete user '+name+' and ALL of their rides and FTP history? This cannot be undone.'))return;
+  try{await call('DELETE','/api/users/'+encodeURIComponent(name));say('umsg','Deleted '+name+'.',true);loadUsers()}
+  catch(e){say('umsg',e.message)}}
+let me='';
 async function load(){
-  const [rides,ftp,me]=await Promise.all([api('/api/rides'),api('/api/ftp'),api('/api/ping')]);
-  $('who').textContent='signed in as '+me.user;
+  const [rides,ftp,meInfo]=await Promise.all([api('/api/rides'),api('/api/ftp'),api('/api/ping')]);
+  me=meInfo.user;$('who').textContent='signed in as '+me+(meInfo.admin?' (admin)':'');if(meInfo.admin)loadUsers();
   const live=rides.filter(r=>!r.deleted);
   const tot=live.reduce((a,r)=>({s:a.s+r.durationSeconds,t:a.t+r.tss,k:a.k+r.kj}),{s:0,t:0,k:0});
   const cur=ftp.length?ftp[ftp.length-1].ftp:null;
@@ -306,11 +427,13 @@ def main():
     init_db()
     args = sys.argv[1:]
     if args[:1] == ["adduser"] and len(args) >= 2:
-        pw = args[2] if len(args) > 2 else getpass.getpass("Password: ")
+        make_admin = "--admin" in args
+        rest = [a for a in args[1:] if a != "--admin"]
+        pw = rest[1] if len(rest) > 1 else getpass.getpass("Password: ")
         if not pw:
             sys.exit("Password cannot be empty")
-        set_user(args[1], pw)
-        print("User '%s' saved." % args[1])
+        set_user(rest[0], pw, True if make_admin else None)
+        print("User '%s' saved%s." % (rest[0], " (admin)" if make_admin else ""))
         return
     if args[:1] == ["users"]:
         with db() as c:
@@ -322,12 +445,15 @@ def main():
         with db() as c:
             exists = c.execute("SELECT 1 FROM users WHERE username=?", (u,)).fetchone()
         if not exists:
-            set_user(u, p)
-            print("Created user '%s'." % u)
+            set_user(u, p, True)
+            print("Created admin user '%s'." % u)
+        else:
+            with db() as c:       # the user named in the environment is always the admin
+                c.execute("UPDATE users SET admin=1 WHERE username=?", (u,))
     with db() as c:
         if c.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
             print("WARNING: no users exist. Set SUMMITROAD_USER and SUMMITROAD_PASSWORD, or run: "
-                  "docker exec -it summitroad python server.py adduser NAME")
+                  "docker exec -it summitroad python server.py adduser NAME --admin")
     print("SummitRoad server %s listening on :%d (data: %s)" % (VERSION, PORT, DATA_DIR))
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
