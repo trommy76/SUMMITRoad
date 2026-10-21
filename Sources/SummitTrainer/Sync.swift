@@ -29,7 +29,7 @@ final class SyncClient: ObservableObject {
         var errorDescription: String? {
             switch self {
             case .notConfigured: return "Sync is not set up."
-            case .unauthorized: return "The server rejected the username or password."
+            case .unauthorized: return "The server rejected the username or password. If two-factor sign-in is on, use an app password from the website's Settings page instead of your normal password."
             case .http(let c): return "Server error \(c)."
             }
         }

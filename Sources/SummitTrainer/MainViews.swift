@@ -781,7 +781,7 @@ struct SettingsView: View {
                 Card {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Home Server (optional)").font(.headline)
-                        Text("Keep your rides, FTP history, training plan, settings and .FIT files on your own SummitRoad server (Docker, on your home network) so other machines see them and you can browse them in a browser. Leave this blank to keep everything only on this Mac.")
+                        Text("Keep your rides, FTP history, training plan, settings and .FIT files on your own SummitRoad server (Docker, on your home network) so other machines see them and you can browse them in a browser. Leave this blank to keep everything only on this Mac. If you turn on two-factor sign-in on the server, create an app password in the website's Settings and enter that here as the password.")
                             .font(.callout).foregroundColor(.gray)
                         HStack {
                             TextField("Server address, e.g. 192.168.1.20:8787", text: $syncURL).frame(width: 280)

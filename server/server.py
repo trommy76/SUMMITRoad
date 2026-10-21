@@ -5,8 +5,9 @@ Standard library only. Data lives in $SUMMITROAD_DATA (default /data).
   python server.py                      run the server
   python server.py adduser NAME [PASS] [--admin]  create a user or reset their password (prompts if PASS omitted)
   python server.py users                list users
+  python server.py resetmfa NAME        turn two-factor off for a user (lost phone)
 """
-import base64, getpass, hashlib, hmac, http.cookies, json, os, queue, re, secrets, sqlite3, sys, threading, time
+import base64, getpass, hashlib, hmac, http.cookies, json, os, queue, re, secrets, sqlite3, struct, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -29,7 +30,12 @@ RUN_UID = 10001
 SESSION_COOKIE = "sr_session"
 SESSION_LONG = 30 * 86400    # "keep me signed in"
 SESSION_SHORT = 12 * 3600
-DOC_NAMES = ("plan", "settings")   # small synced documents: newest change wins
+DOC_NAMES = ("plan", "settings")
+try:
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "qrcode.js"), "rb") as _f:
+        QR_JS = _f.read()      # MIT-licensed QR generator (Kazuhiko Arase), served to the sign-in setup screen
+except OSError:
+    QR_JS = b""   # small synced documents: newest change wins
 LOG_KEEP_DAYS = 90         # activity log retention
 LOG_MAX_ROWS = 20000
 DATA_DIR = os.environ.get("SUMMITROAD_DATA", "/data")
@@ -45,6 +51,9 @@ CREATE TABLE IF NOT EXISTS rides (
   PRIMARY KEY (user, id));
 CREATE TABLE IF NOT EXISTS ftp (user TEXT, id TEXT, date TEXT, ftp REAL, method TEXT, PRIMARY KEY (user, id));
 CREATE TABLE IF NOT EXISTS docs (user TEXT, name TEXT, data TEXT, updated REAL, deleted INTEGER DEFAULT 0, PRIMARY KEY (user, name));
+CREATE TABLE IF NOT EXISTS mfa (user TEXT PRIMARY KEY, secret TEXT, enabled INTEGER DEFAULT 0, last_step INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS recovery (user TEXT, hash TEXT, PRIMARY KEY (user, hash));
+CREATE TABLE IF NOT EXISTS app_passwords (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, name TEXT, salt TEXT, hash TEXT, created REAL, last_used REAL);
 CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user TEXT, created REAL, expires REAL, ip TEXT);
 CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, user TEXT, ip TEXT, client TEXT, type TEXT, detail TEXT);
 CREATE INDEX IF NOT EXISTS events_user ON events (user, id);
@@ -154,6 +163,159 @@ def drop_privileges():
     os.setgroups([])
     os.setgid(RUN_UID)
     os.setuid(RUN_UID)
+
+
+# ---- two-factor sign-in (TOTP, RFC 6238: compatible with Google/Microsoft Authenticator, Authy, 1Password...)
+
+def totp_at(secret, t, step=30, digits=6):
+    key = base64.b32decode(secret.upper() + "=" * (-len(secret) % 8))
+    mac = hmac.new(key, struct.pack(">Q", int(t // step)), hashlib.sha1).digest()
+    o = mac[-1] & 15
+    return str((int.from_bytes(mac[o:o + 4], "big") & 0x7FFFFFFF) % (10 ** digits)).zfill(digits)
+
+
+def new_totp_secret():
+    return base64.b32encode(secrets.token_bytes(20)).decode().rstrip("=")
+
+
+def mfa_enabled(username):
+    with db() as c:
+        row = c.execute("SELECT enabled FROM mfa WHERE user=?", (username,)).fetchone()
+    return bool(row and row["enabled"])
+
+
+def verify_totp(username, secret, code, now=None):
+    """True if `code` is the current (+/- one 30 s step) code and has not been used before."""
+    code = re.sub(r"\D", "", code or "")
+    if len(code) != 6:
+        return False
+    cur = int((now or time.time()) // 30)
+    with db() as c:
+        row = c.execute("SELECT last_step FROM mfa WHERE user=?", (username,)).fetchone()
+        last = (row["last_step"] if row else 0) or 0
+        for d in (0, -1, 1):
+            step = cur + d
+            if step > last and hmac.compare_digest(totp_at(secret, step * 30), code):
+                c.execute("UPDATE mfa SET last_step=? WHERE user=?", (step, username))
+                return True
+    return False
+
+
+def _norm_rc(code):
+    return re.sub(r"[^0-9a-f]", "", (code or "").lower())
+
+
+def make_recovery_codes(username):
+    codes = []
+    with db() as c:
+        c.execute("DELETE FROM recovery WHERE user=?", (username,))
+        for _ in range(10):
+            h = secrets.token_hex(5)
+            codes.append("%s-%s" % (h[:5], h[5:]))
+            c.execute("INSERT INTO recovery (user, hash) VALUES (?,?)", (username, hashlib.sha256(h.encode()).hexdigest()))
+    return codes
+
+
+def use_recovery(username, code):
+    n = _norm_rc(code)
+    if len(n) != 10:
+        return False
+    with db() as c:
+        return c.execute("DELETE FROM recovery WHERE user=? AND hash=?", (username, hashlib.sha256(n.encode()).hexdigest())).rowcount == 1
+
+
+def recovery_left(username):
+    with db() as c:
+        return c.execute("SELECT COUNT(*) FROM recovery WHERE user=?", (username,)).fetchone()[0]
+
+
+def verify_second_factor(username, code):
+    """Returns "totp", "recovery" or None."""
+    with db() as c:
+        row = c.execute("SELECT secret, enabled FROM mfa WHERE user=?", (username,)).fetchone()
+    if not row or not row["enabled"]:
+        return None
+    if verify_totp(username, row["secret"], code):
+        return "totp"
+    if use_recovery(username, code):
+        return "recovery"
+    return None
+
+
+def clear_mfa(username):
+    with db() as c:
+        c.execute("DELETE FROM mfa WHERE user=?", (username,))
+        c.execute("DELETE FROM recovery WHERE user=?", (username,))
+    forget_logins()
+
+
+# Half-finished sign-ins: password accepted, waiting for the second factor.
+_tickets = {}
+
+
+def make_ticket(username, remember):
+    tok = secrets.token_urlsafe(24)
+    now = time.time()
+    with _fails_lock:
+        for k in [k for k, v in _tickets.items() if v["exp"] < now]:
+            del _tickets[k]
+        _tickets[hashlib.sha256(tok.encode()).hexdigest()] = {"user": username, "remember": remember, "exp": now + 300, "tries": 0}
+    return tok
+
+
+def get_ticket(tok):
+    with _fails_lock:
+        t = _tickets.get(hashlib.sha256((tok or "").encode()).hexdigest())
+        return t if t and t["exp"] > time.time() else None
+
+
+def drop_ticket(tok):
+    with _fails_lock:
+        _tickets.pop(hashlib.sha256((tok or "").encode()).hexdigest(), None)
+
+
+# ---- app passwords: long random passwords for the Mac app, usable when two-factor is on
+
+APP_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
+
+
+def create_app_password(username, name):
+    pw = "-".join("".join(secrets.choice(APP_ALPHABET) for _ in range(4)) for _ in range(4))
+    salt = secrets.token_hex(8)
+    with db() as c:
+        c.execute("INSERT INTO app_passwords (user, name, salt, hash, created) VALUES (?,?,?,?,?)",
+                  (username, name[:60] or "App", salt, hashlib.sha256((salt + pw).encode()).hexdigest(), time.time()))
+    return pw
+
+
+def check_app_password(username, password):
+    if not re.fullmatch(r"[a-z0-9]{4}(-[a-z0-9]{4}){3}", password or ""):
+        return False
+    with db() as c:
+        for r in c.execute("SELECT id, salt, hash, last_used FROM app_passwords WHERE user=?", (username,)).fetchall():
+            if hmac.compare_digest(hashlib.sha256((r["salt"] + password).encode()).hexdigest(), r["hash"]):
+                if not r["last_used"] or time.time() - r["last_used"] > 60:
+                    c.execute("UPDATE app_passwords SET last_used=? WHERE id=?", (time.time(), r["id"]))
+                return True
+    return False
+
+
+def check_basic(username, password):
+    """HTTP Basic (the Mac app): an app password always works; the account password only while two-factor is off."""
+    key = ("basic", username, hashlib.sha256(password.encode()).hexdigest())
+    with _auth_lock:
+        if _auth_cache.get(key, 0) > time.time():
+            return True
+    ok = check_app_password(username, password)
+    if not ok:
+        if mfa_enabled(username):
+            time.sleep(0.5)
+        else:
+            ok = check_login(username, password)
+    if ok:
+        with _auth_lock:
+            _auth_cache[key] = time.time() + 300
+    return ok
 
 
 _events = queue.Queue()
@@ -308,6 +470,7 @@ class Handler(BaseHTTPRequestHandler):
         unauthenticated request just returns None instead of sending an error."""
         # State-changing requests must carry a custom header. A web page on another site cannot add it without
         # a CORS preflight, which this server never allows, so forged cross-site requests are rejected.
+        self.auth_kind = None
         if not silent and self.command in ("POST", "PUT", "DELETE") and self.headers.get("X-Requested-With") != "SummitRoad":
             self.send(403, {"error": "missing X-Requested-With header"})
             return None
@@ -322,7 +485,8 @@ class Handler(BaseHTTPRequestHandler):
                     if not silent:
                         self.send(429, {"error": "too many failed logins, try again later"}, extra={"Retry-After": "300"})
                     return None
-                if check_login(u, p):
+                if check_basic(u, p):
+                    self.auth_kind = "basic"
                     if first_seen(("login", u, ip, self.client_kind()), 1800):
                         self.ev(u, "login")
                     return u
@@ -334,10 +498,54 @@ class Handler(BaseHTTPRequestHandler):
         else:
             su = session_user(self.session_token())
             if su:
+                self.auth_kind = "session"
                 return su
         if not silent:
             self.send(401, {"error": "login required"})
         return None
+
+    def need_session(self):
+        """Account management is only for the website: an app password (or the Mac app's login) cannot do it."""
+        if getattr(self, "auth_kind", None) != "session":
+            self.send(403, {"error": "this action is only available when signed in on the website"})
+            return False
+        return True
+
+    def finish_login(self, username, remember, ip, how):
+        token = new_session(username, ip, SESSION_LONG if remember else SESSION_SHORT)
+        log_event(username, ip, "browser", "login", how + (" (kept signed in)" if remember else ""))
+        return self.send(200, {"ok": True, "user": username},
+                         extra={"Set-Cookie": self.cookie_header(token, SESSION_LONG if remember else None)})
+
+    def do_login_mfa(self):
+        if self.headers.get("X-Requested-With") != "SummitRoad":
+            return self.send(403, {"error": "missing X-Requested-With header"})
+        try:
+            obj = json.loads(self.body() or b"{}")
+            ticket, code = str(obj.get("ticket", "")), str(obj.get("code", ""))
+        except Exception:
+            return self.send(400, {"error": "bad request"})
+        ip = self.client_ip()
+        t = get_ticket(ticket)
+        if not t:
+            return self.send(401, {"error": "Your sign-in timed out. Please start again.", "expired": True})
+        u = t["user"]
+        if throttled(ip, u):
+            return self.send(429, {"error": "Too many failed attempts. Please wait a few minutes and try again."},
+                             extra={"Retry-After": "300"})
+        how = verify_second_factor(u, code)
+        if not how:
+            t["tries"] += 1
+            record_fail(ip, u)
+            log_event(u, ip, "browser", "mfa_failed", "wrong code")
+            if t["tries"] >= 5:
+                drop_ticket(ticket)
+                return self.send(401, {"error": "Too many wrong codes. Please sign in again.", "expired": True})
+            return self.send(401, {"error": "That code didn't work. Check the time on your phone and try the next code."})
+        drop_ticket(ticket)
+        if how == "recovery":
+            log_event(u, ip, "browser", "recovery_code_used", "%d left" % recovery_left(u))
+        return self.finish_login(u, t["remember"], ip, "signed in with a recovery code" if how == "recovery" else "signed in with 2FA")
 
     def do_login(self):
         if self.headers.get("X-Requested-With") != "SummitRoad":
@@ -359,11 +567,9 @@ class Handler(BaseHTTPRequestHandler):
             sys.stderr.write("AUTH FAIL ip=%s user=%r\n" % (ip, u[:40]))
             log_event(u[:40], ip, "browser", "login_failed")
             return self.send(401, {"error": "Wrong username or password."})
-        long_session = bool(obj.get("remember"))
-        token = new_session(u, ip, SESSION_LONG if long_session else SESSION_SHORT)
-        log_event(u, ip, "browser", "login", "signed in" + (" (kept signed in)" if long_session else ""))
-        self.send(200, {"ok": True, "user": u},
-                  extra={"Set-Cookie": self.cookie_header(token, SESSION_LONG if long_session else None)})
+        if mfa_enabled(u):                  # password was right: now ask for the 6-digit code
+            return self.send(200, {"mfa": True, "ticket": make_ticket(u, bool(obj.get("remember")))})
+        return self.finish_login(u, bool(obj.get("remember")), ip, "signed in")
 
     def do_logout(self):
         if self.headers.get("X-Requested-With") != "SummitRoad":
@@ -394,6 +600,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parts = self.route()
+        if parts == ["qrcode.js"]:
+            return self.send(200, QR_JS, "application/javascript; charset=utf-8")
         if not parts:                     # the page itself: dashboard when signed in, otherwise the sign-in page
             return self.send(200, DASHBOARD if self.user(silent=True) else LOGIN_PAGE, "text/html; charset=utf-8")
         u = self.user()
@@ -442,12 +650,24 @@ class Handler(BaseHTTPRequestHandler):
                     rows = c.execute("SELECT ts, user, ip, client, type, detail FROM events ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
                 return self.send(200, [dict(r) for r in rows])
             if parts == ["users"]:
+                if not self.need_session():
+                    return
                 if not is_admin(u):
                     return self.send(403, {"error": "admin only"})
                 rows = c.execute(
-                    "SELECT u.username, u.admin, (SELECT COUNT(*) FROM rides r WHERE r.user=u.username AND r.deleted=0) AS rides "
+                    "SELECT u.username, u.admin, (SELECT COUNT(*) FROM rides r WHERE r.user=u.username AND r.deleted=0) AS rides, "
+                    "COALESCE((SELECT enabled FROM mfa m WHERE m.user=u.username), 0) AS mfa "
                     "FROM users u ORDER BY u.username").fetchall()
-                return self.send(200, [{"username": r["username"], "admin": bool(r["admin"]), "rides": r["rides"]} for r in rows])
+                return self.send(200, [{"username": r["username"], "admin": bool(r["admin"]), "rides": r["rides"], "mfa": bool(r["mfa"])} for r in rows])
+            if parts == ["mfa"]:
+                if not self.need_session():
+                    return
+                return self.send(200, {"enabled": mfa_enabled(u), "recoveryLeft": recovery_left(u)})
+            if parts == ["apppasswords"]:
+                if not self.need_session():
+                    return
+                rows = c.execute("SELECT id, name, created, last_used FROM app_passwords WHERE user=? ORDER BY id", (u,)).fetchall()
+                return self.send(200, [dict(r) for r in rows])
             if parts == ["ftp"]:
                 rows = c.execute("SELECT id, date, ftp, method FROM ftp WHERE user=? ORDER BY date", (u,)).fetchall()
                 return self.send(200, [dict(r) for r in rows])
@@ -521,6 +741,8 @@ class Handler(BaseHTTPRequestHandler):
         parts = self.route()
         if parts == ["api", "login"]:
             return self.do_login()
+        if parts == ["api", "login", "mfa"]:
+            return self.do_login_mfa()
         if parts == ["api", "logout"]:
             return self.do_logout()
         u = self.user()
@@ -534,6 +756,8 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             return self.send(400, {"error": "bad json"})
         if parts == ["api", "password"]:                       # change your own password
+            if not self.need_session():
+                return
             old, new = str(obj.get("old", "")), str(obj.get("new", ""))
             if not check_login(u, old):
                 self.ev(u, "password_change_failed", "wrong current password")
@@ -544,9 +768,72 @@ class Handler(BaseHTTPRequestHandler):
             end_user_sessions(u)                      # everyone signed in as this user has to sign in again
             self.ev(u, "password_changed")
             return self.send(200, {"ok": True, "signedOut": True}, extra={"Set-Cookie": self.cookie_header("", 0)})
+        if parts[:2] == ["api", "mfa"] or parts[:2] == ["api", "apppasswords"]:
+            if not self.need_session():
+                return
+            ip = self.client_ip()
+            if parts == ["api", "mfa", "setup"]:
+                if mfa_enabled(u):
+                    return self.send(409, {"error": "two-factor is already on"})
+                secret = new_totp_secret()
+                with db() as c:
+                    c.execute("INSERT INTO mfa (user, secret, enabled, last_step) VALUES (?,?,0,0) "
+                              "ON CONFLICT(user) DO UPDATE SET secret=excluded.secret, enabled=0, last_step=0", (u, secret))
+                uri = "otpauth://totp/SummitRoad:%s?secret=%s&issuer=SummitRoad&algorithm=SHA1&digits=6&period=30" % (u, secret)
+                return self.send(200, {"secret": secret, "uri": uri})
+            if parts == ["api", "mfa", "enable"]:
+                with db() as c:
+                    row = c.execute("SELECT secret, enabled FROM mfa WHERE user=?", (u,)).fetchone()
+                if not row or row["enabled"]:
+                    return self.send(409, {"error": "start the setup first"})
+                if throttled(ip, u) or not verify_totp(u, row["secret"], str(obj.get("code", ""))):
+                    record_fail(ip, u)
+                    log_event(u, ip, "browser", "mfa_failed", "wrong code during setup")
+                    return self.send(400, {"error": "That code didn't match. Check the code in your app and try again."})
+                with db() as c:
+                    c.execute("UPDATE mfa SET enabled=1 WHERE user=?", (u,))
+                codes = make_recovery_codes(u)
+                with db() as c:
+                    has_app = c.execute("SELECT 1 FROM app_passwords WHERE user=?", (u,)).fetchone()
+                app = None
+                if not has_app:                                # keep the Mac app working: give it its own password
+                    app = {"name": "Mac app", "password": create_app_password(u, "Mac app")}
+                forget_logins()
+                self.ev(u, "mfa_enabled")
+                return self.send(200, {"ok": True, "recoveryCodes": codes, "appPassword": app})
+            if parts in (["api", "mfa", "disable"], ["api", "mfa", "recovery"]):
+                if not mfa_enabled(u):
+                    return self.send(409, {"error": "two-factor is not on"})
+                if throttled(ip, u):
+                    return self.send(429, {"error": "Too many failed attempts. Please wait a few minutes and try again."})
+                if not (check_login(u, str(obj.get("password", ""))) and verify_second_factor(u, str(obj.get("code", "")))):
+                    record_fail(ip, u)
+                    log_event(u, ip, "browser", "mfa_failed", "wrong password or code on " + parts[2])
+                    return self.send(403, {"error": "Your password or code was wrong."})
+                if parts[2] == "disable":
+                    clear_mfa(u)
+                    self.ev(u, "mfa_disabled")
+                    return self.send(200, {"ok": True})
+                codes = make_recovery_codes(u)
+                self.ev(u, "recovery_codes_regenerated")
+                return self.send(200, {"ok": True, "recoveryCodes": codes})
+            if parts == ["api", "apppasswords"]:
+                name = str(obj.get("name", "")).strip() or "App"
+                pw = create_app_password(u, name)
+                self.ev(u, "app_password_created", name[:60])
+                return self.send(200, {"ok": True, "name": name[:60], "password": pw})
+            return self.send(404, {"error": "not found"})
         if parts[:2] == ["api", "users"]:
+            if not self.need_session():
+                return
             if not is_admin(u):
                 return self.send(403, {"error": "admin only"})
+            if len(parts) == 5 and parts[3:] == ["mfa", "reset"]:    # lost phone: admin turns two-factor off for a user
+                name = parts[2]
+                clear_mfa(name)
+                end_user_sessions(name)
+                self.ev(u, "mfa_reset", "for " + name)
+                return self.send(200, {"ok": True})
             if len(parts) == 2:                                # add a user
                 name, pw = str(obj.get("username", "")).strip(), str(obj.get("password", ""))
                 if not USER_RE.match(name):
@@ -577,7 +864,19 @@ class Handler(BaseHTTPRequestHandler):
         u = self.user()
         if not u:
             return
+        if len(parts) == 3 and parts[:2] == ["api", "apppasswords"]:
+            if not self.need_session():
+                return
+            with db() as c:
+                row = c.execute("SELECT name FROM app_passwords WHERE user=? AND id=?", (u, parts[2])).fetchone()
+                n = c.execute("DELETE FROM app_passwords WHERE user=? AND id=?", (u, parts[2])).rowcount
+            forget_logins()
+            if n:
+                self.ev(u, "app_password_revoked", (row["name"] if row else "")[:60])
+            return self.send(200 if n else 404, {"ok": n > 0})
         if len(parts) == 3 and parts[:2] == ["api", "users"]:   # remove a user and all their data
+            if not self.need_session():
+                return
             if not is_admin(u):
                 return self.send(403, {"error": "admin only"})
             name = parts[2]
@@ -588,6 +887,9 @@ class Handler(BaseHTTPRequestHandler):
                 c.execute("DELETE FROM ftp WHERE user=?", (name,))
                 c.execute("DELETE FROM docs WHERE user=?", (name,))
                 c.execute("DELETE FROM sessions WHERE user=?", (name,))
+                c.execute("DELETE FROM mfa WHERE user=?", (name,))
+                c.execute("DELETE FROM recovery WHERE user=?", (name,))
+                c.execute("DELETE FROM app_passwords WHERE user=?", (name,))
                 cur = c.execute("DELETE FROM users WHERE username=?", (name,))
             forget_logins()
             if cur.rowcount:
@@ -627,6 +929,7 @@ input[type=text],input[type=password]{background:#111114;color:var(--fg);border:
 #planWeeks table{table-layout:fixed}#planWeeks td:nth-child(1){width:150px}#planWeeks td:nth-child(3){width:230px}
 nav{display:flex;gap:4px;margin-left:12px}nav a{color:var(--mut);text-decoration:none;padding:6px 12px;border-radius:6px}nav a.on{color:var(--fg);background:#2c2c33}
 .tip{position:absolute;pointer-events:none;display:none;background:#25252b;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.55;white-space:nowrap;z-index:5}
+.secret{margin:8px 0;font-size:16px}code{background:#111114;padding:3px 8px;border-radius:6px;border:1px solid var(--line);font-size:15px}pre{margin:8px 0;background:#111114;padding:10px 12px;border-radius:8px;border:1px solid var(--line)}
 .fb li{margin:4px 0}button{background:#2c2c33;color:var(--fg);border:0;border-radius:6px;padding:6px 12px;cursor:pointer}
 </style></head><body>
 <header><div class="logo"><b>SUMMIT</b><span>ROAD</span></div><nav><a href="#" id="navDash">Dashboard</a><a href="#plan" id="navPlan">Training Plan</a><a href="#settings" id="navSettings">Settings</a></nav><div class="muted" id="who" style="margin-left:auto"></div><div class="muted" id="ver"></div><button onclick="logout()" title="Sign out of this browser">Sign out</button></header>
@@ -646,8 +949,13 @@ nav{display:flex;gap:4px;margin-left:12px}nav a{color:var(--mut);text-decoration
 <div class="card"><h2>Change password</h2>
 <form class="row" onsubmit="changePw();return false"><input type="text" autocomplete="username" style="display:none" tabindex="-1" aria-hidden="true"><input type="password" id="pwold" autocomplete="current-password" placeholder="Current password" required><input type="password" id="pwnew" autocomplete="new-password" placeholder="New password (min 10)" required><input type="password" id="pwnew2" autocomplete="new-password" placeholder="Repeat new password" required><button type="submit">Change password</button></form>
 <div id="pwmsg" class="msg"></div></div>
+<div class="card" id="mfaCard" style="margin-top:20px"><h2>Two-factor authentication</h2><div id="mfaBody" class="muted">Loading…</div><div id="mfaMsg" class="msg"></div><div id="mfaCodes"></div></div>
+<div class="card" id="appCard" style="margin-top:20px"><h2>App passwords</h2>
+<div class="muted" style="margin-bottom:10px">The SummitRoad Mac app signs in with one of these (Settings &gt; Home Server &gt; Update Login). While two-factor is on, your normal password no longer works in the app. You can make one per computer and revoke it any time.</div>
+<div class="scroll"><table><thead><tr><th>Name</th><th>Created</th><th>Last used</th><th></th></tr></thead><tbody id="appRows"></tbody></table></div>
+<form class="row" onsubmit="makeAppPw();return false" autocomplete="off" style="margin-top:10px"><input type="text" id="appName" value="Mac app" placeholder="Name, e.g. Kevin's MacBook" autocomplete="off"><button type="submit">Create app password</button></form><div id="appMsg" class="msg"></div></div>
 <div class="card" id="usersCard" style="display:none;margin-top:20px"><h2>Users (admin)</h2>
-<div class="scroll"><table><thead><tr><th>User</th><th>Role</th><th>Rides</th><th></th></tr></thead><tbody id="users"></tbody></table></div>
+<div class="scroll"><table><thead><tr><th>User</th><th>Role</th><th>Rides</th><th>2FA</th><th></th></tr></thead><tbody id="users"></tbody></table></div>
 <h2 style="margin-top:16px">Add a user</h2>
 <form class="row" onsubmit="addUser();return false" autocomplete="off"><input type="text" id="nuname" autocomplete="off" placeholder="Username" required><input type="password" id="nupw" autocomplete="new-password" placeholder="Password (min 10)" required><label class="muted" style="margin-right:10px"><input type="checkbox" id="nuadmin"> admin</label><button type="submit">Add user</button></form>
 <div id="umsg" class="msg"></div></div>
@@ -659,6 +967,7 @@ nav{display:flex;gap:4px;margin-left:12px}nav a{color:var(--mut);text-decoration
 <div class="muted" style="margin-top:8px;font-size:12px">Showing the latest 200 events. Kept for 90 days.</div></div>
 </div>
 </main>
+<script src="/qrcode.js"></script>
 <script>
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -679,9 +988,60 @@ async function changePw(){
   catch(e){say('pwmsg',e.message)}}
 async function loadUsers(){
   const us=await api('/api/users');$('usersCard').style.display='block';
-  $('users').innerHTML=us.map(u=>'<tr style="cursor:default"><td>'+esc(u.username)+'</td><td>'+(u.admin?'admin':'user')+'</td><td>'+u.rides+'</td><td>'
+  $('users').innerHTML=us.map(u=>'<tr style="cursor:default"><td>'+esc(u.username)+'</td><td>'+(u.admin?'admin':'user')+'</td><td>'+u.rides+'</td><td>'+(u.mfa?'on':'off')+'</td><td>'
     +'<button data-u="'+esc(u.username)+'" onclick="resetPw(this.dataset.u)">Reset password</button> '
+    +(u.mfa?'<button data-u="'+esc(u.username)+'" onclick="resetMfa(this.dataset.u)">Reset 2FA</button> ':'')
     +(u.username===me?'':'<button data-u="'+esc(u.username)+'" onclick="delUser(this.dataset.u)">Delete</button>')+'</td></tr>').join('')}
+async function resetMfa(name){
+  if(!confirm('Turn off two-factor for '+name+'? Use this if they lost their phone. They will be signed out and can set it up again.'))return;
+  try{await call('POST','/api/users/'+encodeURIComponent(name)+'/mfa/reset');say('umsg','Two-factor reset for '+name+'.',true);loadUsers()}
+  catch(e){say('umsg',e.message)}}
+function fmtDT(t){return t?new Date(t*1000).toLocaleString():'never'}
+function copyText(t,btn){if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(()=>{btn.textContent='Copied'},()=>{btn.textContent='Select and copy by hand'})}else{btn.textContent='Select and copy by hand'}}
+async function loadMfa(){
+  try{renderMfa(await api('/api/mfa'))}catch(e){}
+  try{await loadApps()}catch(e){}
+  if($('usersCard').style.display==='block')loadUsers().catch(()=>{})}
+function renderMfa(m){
+  $('mfaBody').className='';
+  $('mfaBody').innerHTML=m.enabled
+   ?'<p class="ok" style="margin-top:0">&#10003; Two-factor is on. '+m.recoveryLeft+' recovery code'+(m.recoveryLeft===1?'':'s')+' left.</p>'
+    +'<div class="muted" style="margin-bottom:8px">To change it, confirm with your password and a code from your app (or a recovery code).</div>'
+    +'<form class="row" onsubmit="return false" autocomplete="off"><input type="password" id="mfaPw" autocomplete="current-password" placeholder="Your password"><input type="text" id="mfaCode" inputmode="numeric" autocomplete="one-time-code" placeholder="Code" maxlength="12"></form>'
+    +'<div class="row"><button type="button" onclick="mfaRecovery()">Make new recovery codes</button><button type="button" onclick="mfaDisable()" style="margin-left:6px">Turn off two-factor</button></div>'
+   :'<p style="margin-top:0" class="muted">Adds a second step when you sign in: a 6-digit code from an app such as Google Authenticator, Microsoft Authenticator or Authy. The Mac app will then sign in with an app password instead of your normal password.</p><button type="button" onclick="mfaSetup()">Set up two-factor</button><div id="mfaSetup"></div>'}
+async function mfaSetup(){
+  try{const r=await call('POST','/api/mfa/setup');
+    const q=qrcode(0,'M');q.addData(r.uri);q.make();
+    $('mfaSetup').innerHTML='<ol class="muted" style="line-height:1.7"><li>In your authenticator app, add an account and scan this code (or type the key below).</li><li>Enter the 6-digit code the app shows to turn two-factor on.</li></ol>'
+      +'<div style="background:#fff;padding:12px;display:inline-block;border-radius:8px">'+q.createSvgTag(6,0)+'</div>'
+      +'<div class="muted" style="margin:8px 0">Can&rsquo;t scan? Enter this key: <code>'+r.secret.replace(/(.{4})/g,'$1 ').trim()+'</code></div>'
+      +'<form class="row" onsubmit="mfaEnable();return false" autocomplete="off"><input type="text" id="mfaEnableCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="6-digit code" required><button type="submit">Turn on</button></form>';
+    say('mfaMsg','',true)}
+  catch(e){say('mfaMsg',e.message)}}
+function showCodes(codes,app){
+  $('mfaCodes').innerHTML=(app?'<div class="card" style="background:#111114;margin-top:12px"><b>Your Mac app now needs an app password</b><div class="muted">In the Mac app open Settings &gt; Home Server, keep your username and paste this as the password, then press Update Login. It is shown only once.</div><div class="secret"><code>'+esc(app.password)+'</code> <button type="button" data-t="'+esc(app.password)+'" onclick="copyText(this.dataset.t,this)">Copy</button></div></div>':'')
+   +'<div class="card" style="background:#111114;margin-top:12px"><b>Recovery codes</b><div class="muted">Each works once if you lose your phone. Save them somewhere safe: they will not be shown again.</div><pre>'+codes.map(esc).join('\n')+'</pre><button type="button" data-t="'+esc(codes.join('\n'))+'" onclick="copyText(this.dataset.t,this)">Copy all</button></div>'}
+async function mfaEnable(){
+  try{const r=await call('POST','/api/mfa/enable',{code:$('mfaEnableCode').value});await loadMfa();showCodes(r.recoveryCodes,r.appPassword);say('mfaMsg','Two-factor is on. Save your recovery codes below.',true)}
+  catch(e){say('mfaMsg',e.message)}}
+async function mfaRecovery(){
+  try{const r=await call('POST','/api/mfa/recovery',{password:$('mfaPw').value,code:$('mfaCode').value});await loadMfa();showCodes(r.recoveryCodes,null);say('mfaMsg','New recovery codes made. The old ones no longer work.',true)}
+  catch(e){say('mfaMsg',e.message)}}
+async function mfaDisable(){
+  if(!confirm('Turn off two-factor? Signing in will only need your password again.'))return;
+  try{await call('POST','/api/mfa/disable',{password:$('mfaPw').value,code:$('mfaCode').value});$('mfaCodes').innerHTML='';await loadMfa();say('mfaMsg','Two-factor is off. The Mac app can use your normal password again (app passwords keep working too).',true)}
+  catch(e){say('mfaMsg',e.message)}}
+async function loadApps(){
+  const l=await api('/api/apppasswords');
+  $('appRows').innerHTML=l.map(a=>'<tr style="cursor:default"><td>'+esc(a.name)+'</td><td>'+fmtDT(a.created)+'</td><td>'+fmtDT(a.last_used)+'</td><td><button data-id="'+a.id+'" onclick="revokeApp(this.dataset.id)">Revoke</button></td></tr>').join('')||'<tr style="cursor:default"><td colspan="4" class="muted">No app passwords yet.</td></tr>'}
+async function makeAppPw(){
+  try{const r=await call('POST','/api/apppasswords',{name:$('appName').value});
+    $('appMsg').className='msg';$('appMsg').innerHTML='App password for &ldquo;'+esc(r.name)+'&rdquo; (shown only once):<div class="secret"><code>'+esc(r.password)+'</code> <button type="button" data-t="'+esc(r.password)+'" onclick="copyText(this.dataset.t,this)">Copy</button></div>';loadApps()}
+  catch(e){say('appMsg',e.message)}}
+async function revokeApp(id){
+  if(!confirm('Revoke this app password? Anything using it (like the Mac app) will stop signing in.'))return;
+  try{await call('DELETE','/api/apppasswords/'+id);say('appMsg','Revoked.',true);loadApps()}catch(e){say('appMsg',e.message)}}
 async function addUser(){
   try{await call('POST','/api/users',{username:$('nuname').value,password:$('nupw').value,admin:$('nuadmin').checked});
     $('nuname').value=$('nupw').value='';$('nuadmin').checked=false;say('umsg','User added.',true);loadUsers()}
@@ -695,7 +1055,7 @@ async function delUser(name){
   try{await call('DELETE','/api/users/'+encodeURIComponent(name));say('umsg','Deleted '+name+'.',true);loadUsers()}
   catch(e){say('umsg',e.message)}}
 let me='';
-const EV={login:'Signed in',login_failed:'Failed sign-in',throttled:'Blocked (too many failures)',sync:'App synced',dashboard_view:'Viewed dashboard',ride_added:'Ride uploaded',ride_updated:'Ride updated',ride_deleted:'Ride deleted',logout:'Signed out',plan_updated:'Training plan synced',plan_cleared:'Training plan cleared',settings_updated:'Settings synced',ftp_added:'FTP result added',password_changed:'Password changed',password_change_failed:'Password change failed',password_reset:'Password reset',user_added:'User added',user_deleted:'User deleted'};
+const EV={login:'Signed in',login_failed:'Failed sign-in',throttled:'Blocked (too many failures)',sync:'App synced',dashboard_view:'Viewed dashboard',ride_added:'Ride uploaded',ride_updated:'Ride updated',ride_deleted:'Ride deleted',logout:'Signed out',mfa_enabled:'Two-factor turned on',mfa_disabled:'Two-factor turned off',mfa_reset:'Two-factor reset by admin',mfa_failed:'Failed two-factor code',recovery_code_used:'Recovery code used',recovery_codes_regenerated:'New recovery codes made',app_password_created:'App password created',app_password_revoked:'App password revoked',plan_updated:'Training plan synced',plan_cleared:'Training plan cleared',settings_updated:'Settings synced',ftp_added:'FTP result added',password_changed:'Password changed',password_change_failed:'Password change failed',password_reset:'Password reset',user_added:'User added',user_deleted:'User deleted'};
 const KIND={endurance:'Endurance',tempo:'Tempo',sweetSpot:'Sweet Spot',threshold:'Threshold',overUnder:'Over-Unders',vo2:'VO2 Max',vo2OnOff:'VO2 Max On-Offs',ftpRamp:'FTP Ramp Test',ftp20:'FTP 20-Minute Test',adhoc:'Workout'};
 const GOAL={raiseFTP:'Raise my FTP',timeTrial:'Time trial / sustained power',roadRace:'Road race / criterium',century:'Century / long event',general:'General fitness'};
 const PHASE={base:'Base',build:'Build',specialty:'Specialty'};
@@ -728,7 +1088,7 @@ async function initLog(isAdmin){
 function route(){const h=location.hash,pg=h==='#settings'?'settings':h==='#plan'?'plan':'dash';
   $('pageDash').style.display=pg==='dash'?'block':'none';$('pagePlan').style.display=pg==='plan'?'block':'none';$('pageSettings').style.display=pg==='settings'?'block':'none';
   $('navDash').className=pg==='dash'?'on':'';$('navPlan').className=pg==='plan'?'on':'';$('navSettings').className=pg==='settings'?'on':'';
-  if(pg==='plan')loadPlan();window.scrollTo(0,0)}
+  if(pg==='plan')loadPlan();if(pg==='settings')loadMfa();window.scrollTo(0,0)}
 window.addEventListener('hashchange',route);route();
 async function load(){
   const [rides,ftp,meInfo]=await Promise.all([api('/api/rides'),api('/api/ftp'),api('/api/ping')]);
@@ -830,10 +1190,17 @@ button.go:hover{filter:brightness(1.1)}button.go:disabled{opacity:.6;cursor:defa
   <div class="logo"><b>SUMMIT</b><span>ROAD</span></div>
   <div class="tag">Your training, at home.</div>
   <form class="card" id="f" onsubmit="return go(event)" autocomplete="on">
+    <div id="step1">
     <div class="field"><label for="u">Username</label><input type="text" id="u" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" autofocus required></div>
     <div class="field"><label for="p">Password</label><input type="password" id="p" name="password" autocomplete="current-password" required>
       <button type="button" class="eye" id="eye" onclick="toggle()">Show</button></div>
     <div class="row"><input type="checkbox" id="r" checked><label for="r" style="margin:0;text-transform:none;letter-spacing:0;font-size:14px">Keep me signed in on this device</label></div>
+    </div>
+    <div id="step2" style="display:none">
+      <div style="text-align:center;margin-bottom:14px;color:var(--mut)" id="s2msg">Enter the 6-digit code from your authenticator app.</div>
+      <div class="field"><label for="c" id="clabel">Authentication code</label><input type="text" id="c" name="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="12" spellcheck="false"></div>
+      <div style="text-align:center;font-size:14px;margin:-6px 0 14px"><a href="#" id="alt" onclick="swapMode();return false" style="color:var(--accent)">Use a recovery code instead</a> &middot; <a href="#" onclick="backToPw();return false" style="color:var(--accent)">Back</a></div>
+    </div>
     <button class="go" id="b" type="submit">Sign in</button>
     <div class="err" id="e" role="alert"></div>
   </form>
@@ -842,16 +1209,30 @@ button.go:hover{filter:brightness(1.1)}button.go:disabled{opacity:.6;cursor:defa
 <script>
 const $=id=>document.getElementById(id);
 function toggle(){const p=$('p'),show=p.type==='password';p.type=show?'text':'password';$('eye').textContent=show?'Hide':'Show'}
+let ticket=null,recovery=false;
+function show2(){$('step2').style.display='block';$('step1').style.display='none';$('b').textContent='Verify';$('c').value='';$('c').focus()}
+function backToPw(){ticket=null;$('step2').style.display='none';$('step1').style.display='block';$('b').textContent='Sign in';$('e').textContent='';$('p').value='';$('p').focus()}
+function swapMode(){recovery=!recovery;$('c').value='';$('c').maxLength=recovery?12:8;$('c').inputMode=recovery?'text':'numeric';
+  $('clabel').textContent=recovery?'Recovery code':'Authentication code';$('s2msg').textContent=recovery?'Enter one of your saved recovery codes. Each works once.':'Enter the 6-digit code from your authenticator app.';
+  $('alt').textContent=recovery?'Use my authenticator app instead':'Use a recovery code instead';$('c').focus()}
+async function post(path,body){const r=await fetch(location.origin+path,{method:'POST',headers:{'Content-Type':'application/json','X-Requested-With':'SummitRoad'},body:JSON.stringify(body)});
+  let j={};try{j=await r.json()}catch(x){}return [r,j]}
 async function go(ev){
-  ev.preventDefault();$('e').textContent='';$('b').disabled=true;$('b').textContent='Signing in…';
+  if(ev)ev.preventDefault();$('e').textContent='';$('b').disabled=true;$('b').textContent='Checking…';
   try{
-    const r=await fetch(location.origin+'/api/login',{method:'POST',headers:{'Content-Type':'application/json','X-Requested-With':'SummitRoad'},
-      body:JSON.stringify({username:$('u').value,password:$('p').value,remember:$('r').checked})});
-    let j={};try{j=await r.json()}catch(x){}
-    if(r.ok){location.href='/';return}
-    $('e').textContent=j.error||('Sign-in failed ('+r.status+')');$('p').select()
+    if(!ticket){
+      const [r,j]=await post('/api/login',{username:$('u').value,password:$('p').value,remember:$('r').checked});
+      if(r.ok&&j.mfa){ticket=j.ticket;recovery=true;swapMode();show2();$('b').disabled=false;return false}
+      if(r.ok){location.href='/';return false}
+      $('e').textContent=j.error||('Sign-in failed ('+r.status+')');$('p').select()
+    }else{
+      const [r,j]=await post('/api/login/mfa',{ticket:ticket,code:$('c').value});
+      if(r.ok){location.href='/';return false}
+      if(j.expired){backToPw();$('e').textContent=j.error}else{$('e').textContent=j.error||('Sign-in failed ('+r.status+')');$('c').select()}
+    }
   }catch(x){$('e').textContent='Could not reach the server.'}
-  $('b').disabled=false;$('b').textContent='Sign in';return false}
+  $('b').disabled=false;$('b').textContent=ticket?'Verify':'Sign in';return false}
+$('c').addEventListener('input',()=>{if(!recovery&&/^\d{6}$/.test($('c').value.replace(/\s/g,'')))go()});
 </script></body></html>"""
 
 
@@ -866,6 +1247,11 @@ def main():
             sys.exit("Password cannot be empty")
         set_user(rest[0], pw, True if make_admin else None)
         print("User '%s' saved%s." % (rest[0], " (admin)" if make_admin else ""))
+        return
+    if args[:1] == ["resetmfa"] and len(args) == 2:
+        clear_mfa(args[1])
+        end_user_sessions(args[1])
+        print("Two-factor turned off for '%s'." % args[1])
         return
     if args[:1] == ["users"]:
         with db() as c:

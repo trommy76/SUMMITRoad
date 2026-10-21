@@ -44,6 +44,27 @@ are stored in the server's database as a hash and sent as a secure `HttpOnly`, `
 everywhere. The SummitRoad Mac app does not use cookies: it keeps sending its username and password with each
 request, so it is unaffected.
 
+## Two-factor sign-in (authenticator app)
+
+On the website open **Settings > Two-factor authentication > Set up two-factor**, scan the QR code with an app such as
+Google Authenticator, Microsoft Authenticator, Authy or 1Password, and enter the 6-digit code it shows. You are given
+10 one-time **recovery codes**; keep them somewhere safe. After that, signing in asks for your password and then a code
+(or a recovery code). Codes can only be used once, and wrong codes count towards the sign-in lockout.
+
+**The Mac app and app passwords.** The app cannot type a code, and it sends its login with every request, so while
+two-factor is on your normal password stops working for it (otherwise anyone with your password could skip the code).
+Instead, make an **app password** in Settings (turning on two-factor makes one called "Mac app" for you automatically),
+then in the Mac app open Settings > Home Server, keep your username, paste the app password as the password and press
+Update Login. App passwords are random, shown only once, can be revoked individually, and can read and write your rides
+but cannot change your account, passwords or two-factor.
+
+**Lost phone?** Use a recovery code. If you have none, an admin can use **Reset 2FA** next to your name on the Users
+list, or from the command line: `docker exec -it summitroad python server.py resetmfa NAME`.
+
+Notes: the authenticator secret is stored in the server's database as plain text (it has to be, to check codes), so
+protect the data volume. The QR code is drawn in your browser by the bundled `qrcode.js` (MIT licence, Kazuhiko Arase,
+licence text kept in the file); nothing is sent to any other site.
+
 ## Users and passwords
 
 The user in `docker-compose.yml` (`SUMMITROAD_USER`) is the **admin**. Sign in to the dashboard in a browser:
