@@ -516,6 +516,7 @@ input[type=text],input[type=password]{background:#111114;color:var(--fg);border:
 .row{display:flex;flex-wrap:wrap;align-items:center}.msg{margin-top:6px;font-size:13px}.ok{color:var(--green)}.err{color:#e5484d}
 #planWeeks table{table-layout:fixed}#planWeeks td:nth-child(1){width:150px}#planWeeks td:nth-child(3){width:230px}
 nav{display:flex;gap:4px;margin-left:12px}nav a{color:var(--mut);text-decoration:none;padding:6px 12px;border-radius:6px}nav a.on{color:var(--fg);background:#2c2c33}
+.tip{position:absolute;pointer-events:none;display:none;background:#25252b;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.55;white-space:nowrap;z-index:5}
 .fb li{margin:4px 0}button{background:#2c2c33;color:var(--fg);border:0;border-radius:6px;padding:6px 12px;cursor:pointer}
 </style></head><body>
 <header><div class="logo"><b>SUMMIT</b><span>ROAD</span></div><nav><a href="#" id="navDash">Dashboard</a><a href="#plan" id="navPlan">Training Plan</a><a href="#settings" id="navSettings">Settings</a></nav><div class="muted" id="who" style="margin-left:auto"></div><div class="muted" id="ver"></div></header>
@@ -649,7 +650,30 @@ async function show(id){
   if(s.length>1){const W=1000,H=260,P=30,n=s.length-1,mp=Math.max(100,...s.map(x=>Math.max(x.power,x.target||0)))*1.1,mh=Math.max(...s.map(x=>x.hr||0),1);
     const sm=s.map((x,i)=>{let a=0,c=0;for(let j=Math.max(0,i-4);j<=i;j++){a+=s[j].power;c++}return a/c});
     const tg=s.map((x,i)=>[i/n,(x.target||0)/mp]),pw=sm.map((v,i)=>[i/n,v/mp]),hr=s.map((x,i)=>[i/n,(x.hr||0)/(mh*1.1)]);
-    $('dchart').innerHTML='<svg viewBox="0 0 '+W+' '+H+'">'+line(tg,W,H,'#555566',P)+line(pw,W,H,'#9e52f2',P)+(mh>1?line(hr,W,H,'#e5484d',P):'')+'<text x="4" y="14" fill="#8b8b96" font-size="11">'+Math.round(mp)+' W</text></svg><div class="muted">Power (purple), target (grey), heart rate (red)</div>'}
+    $('dchart').innerHTML='<div id="cwrap" style="position:relative"><svg id="csvg" viewBox="0 0 '+W+' '+H+'">'+line(tg,W,H,'#555566',P)+line(pw,W,H,'#9e52f2',P)+(mh>1?line(hr,W,H,'#e5484d',P):'')
+      +'<text x="4" y="14" fill="#8b8b96" font-size="11">'+Math.round(mp)+' W</text>'
+      +'<line id="hline" x1="0" x2="0" y1="'+P+'" y2="'+(H-P)+'" stroke="#8b8b96" stroke-dasharray="3 3" style="display:none"/>'
+      +'<circle id="hpw" r="4.5" fill="#9e52f2" style="display:none"/><circle id="htg" r="3.5" fill="#8b8b99" style="display:none"/><circle id="hhr" r="4" fill="#e5484d" style="display:none"/>'
+      +'</svg><div id="tip" class="tip"></div></div><div class="muted">Power (purple), target (grey), heart rate (red). Hover the chart for the values at each point.</div>';
+    const svg=$('csvg'),tip=$('tip'),X=i=>P+i/n*(W-2*P),Y=(v,m)=>H-P-v/m*(H-2*P);
+    const clock=t=>{t=Math.round(t);const h=Math.floor(t/3600),m=Math.floor(t%3600/60),sec=t%60;return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(sec).padStart(2,'0')};
+    const hide=()=>{tip.style.display='none';['hline','hpw','htg','hhr'].forEach(i=>$(i).style.display='none')};
+    const move=ev=>{
+      const rc=svg.getBoundingClientRect(),fx=(ev.clientX-rc.left)/rc.width*W;
+      const i=Math.max(0,Math.min(n,Math.round((fx-P)/(W-2*P)*n))),d=s[i],x=X(i);
+      $('hline').setAttribute('x1',x);$('hline').setAttribute('x2',x);$('hline').style.display='block';
+      const dot=(id,v,m)=>{const e=$(id);if(v==null||!(v>0)){e.style.display='none';return}e.setAttribute('cx',x);e.setAttribute('cy',Y(v,m));e.style.display='block'};
+      dot('hpw',sm[i],mp);dot('htg',d.target,mp);dot('hhr',d.hr,mh*1.1);
+      const row=(label,val,color)=>val==null||val===''?'':'<div><span style="color:'+color+'">&#9679;</span> '+label+' <b>'+val+'</b></div>';
+      tip.innerHTML='<div class="muted">'+clock(d.t!=null?d.t:i)+' into the ride'+(d.kind?' · '+esc(d.kind):'')+'</div>'
+        +row('Power',d.power+' W','#9e52f2')+'<div class="muted" style="margin-left:14px">5 s avg '+Math.round(sm[i])+' W</div>'
+        +row('Target',d.target?d.target+' W':null,'#8b8b99')+row('Heart rate',d.hr?d.hr+' bpm':null,'#e5484d')
+        +row('Cadence',d.cad?d.cad+' rpm':null,'#4cc38a')+row('Speed',d.speed!=null?d.speed.toFixed(1)+' km/h':null,'#4aa3ff');
+      tip.style.display='block';
+      const px=x/W*rc.width,tw=tip.offsetWidth;
+      tip.style.left=(px+14+tw>rc.width?Math.max(0,px-14-tw):px+14)+'px';tip.style.top='6px';
+    };
+    svg.addEventListener('pointermove',move);svg.addEventListener('pointerdown',move);svg.addEventListener('pointerleave',hide)}
   else $('dchart').innerHTML='';
   $('dfb').innerHTML=(r.feedback||[]).map(f=>'<li>'+esc(f)+'</li>').join('');
   $('dlinks').innerHTML=r.hasFit===false?'':'<a href="/api/rides/'+id+'/fit">Download .FIT</a>';
