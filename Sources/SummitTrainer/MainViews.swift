@@ -526,10 +526,78 @@ struct RideReportView: View {
 
 struct SampleChart: View {
     let samples: [Sample]
+    @State private var hover: Int?
+
+    private var maxP: Double { Double(max(samples.map { max($0.power, $0.target ?? 0) }.max() ?? 100, 100)) * 1.15 }
+
+    private func avg5(_ i: Int) -> Int {
+        let slice = samples[max(0, i - 4)...i]
+        return Int((Double(slice.map { $0.power }.reduce(0, +)) / Double(slice.count)).rounded())
+    }
+
+    private func tipLine(_ color: Color, _ label: String, _ value: String) -> some View {
+        HStack(spacing: 6) {
+            Circle().fill(color).frame(width: 7, height: 7)
+            Text(label).foregroundColor(.gray)
+            Spacer(minLength: 8)
+            Text(value).bold().monospacedDigit()
+        }
+    }
+
+    private func tooltip(_ i: Int) -> some View {
+        let s = samples[i]
+        return VStack(alignment: .leading, spacing: 3) {
+            Text("\(formatTime(s.t)) into the ride · \(s.kind.title)").font(.caption2).foregroundColor(.gray)
+            tipLine(.green, "Power", "\(s.power) W")
+            Text("5 s avg \(avg5(i)) W").font(.caption2).foregroundColor(.gray).padding(.leading, 13)
+            if let t = s.target, t > 0 { tipLine(.blue, "Target", "\(t) W") }
+            if let h = s.hr { tipLine(.red, "Heart rate", "\(h) bpm") }
+            if let c = s.cad { tipLine(.orange, "Cadence", "\(c) rpm") }
+            if let v = s.speed { tipLine(.cyan, "Speed", String(format: "%.1f km/h", v)) }
+        }
+        .font(.caption)
+        .padding(8)
+        .frame(width: 190)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(white: 0.17)))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(white: 0.3)))
+        .allowsHitTesting(false)
+    }
+
+    private func hoverOverlay(_ size: CGSize) -> some View {
+        let n = max(1, samples.count - 1)
+        func y(_ v: Double) -> CGFloat { size.height - CGFloat(v / maxP) * size.height }
+        return ZStack(alignment: .topLeading) {
+            Color.clear.contentShape(Rectangle())
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let p):
+                        hover = max(0, min(samples.count - 1, Int((p.x / max(1, size.width) * Double(n)).rounded())))
+                    case .ended:
+                        hover = nil
+                    }
+                }
+            if let i = hover, i < samples.count {
+                let s = samples[i]
+                let x = CGFloat(i) / CGFloat(n) * size.width
+                Rectangle().fill(Color.white.opacity(0.45)).frame(width: 1, height: size.height).offset(x: x).allowsHitTesting(false)
+                Circle().fill(Color.green).frame(width: 8, height: 8).position(x: x, y: y(Double(avg5(i)))).allowsHitTesting(false)
+                if let t = s.target, t > 0 {
+                    Circle().fill(Color.blue).frame(width: 7, height: 7).position(x: x, y: y(Double(t))).allowsHitTesting(false)
+                }
+                if let h = s.hr {
+                    Circle().fill(Color.red).frame(width: 7, height: 7).position(x: x, y: y(Double(h))).allowsHitTesting(false)
+                }
+                tooltip(i)
+                    .offset(x: x > size.width * 0.6 ? x - 190 - 12 : x + 12, y: 6)
+            }
+        }
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+    }
+
     var body: some View {
         Canvas { ctx, size in
             guard samples.count > 1 else { return }
-            let maxP = Double(max(samples.map { max($0.power, $0.target ?? 0) }.max() ?? 100, 100)) * 1.15
+            let maxP = self.maxP
             let n = Double(samples.count - 1)
             func x(_ i: Int) -> CGFloat { CGFloat(Double(i) / n) * size.width }
             func y(_ v: Double) -> CGFloat { size.height - CGFloat(v / maxP) * size.height }
@@ -560,7 +628,11 @@ struct SampleChart: View {
         }
         .background(Color(white: 0.10))
         .overlay(alignment: .topTrailing) {
-            Text("blue = target · green = power · red = heart rate").font(.caption2).foregroundColor(.gray).padding(6)
+            Text("blue = target · green = power · red = heart rate · hover for values").font(.caption2).foregroundColor(.gray).padding(6)
+                .allowsHitTesting(false)
+        }
+        .overlay {
+            if samples.count > 1 { GeometryReader { geo in hoverOverlay(geo.size) } }
         }
     }
 }
