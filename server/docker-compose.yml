@@ -11,6 +11,9 @@ services:
       SUMMITROAD_PASSWORD: "change-me"
       # Set to "1" when Cloudflare / a reverse proxy sits in front, so login throttling sees the real client IP.
       SUMMITROAD_TRUST_PROXY: "1"
+      # Locked out of two-factor? Uncomment, redeploy, sign in with just your password (and your Mac app can use its
+      # normal password again), fix things in Settings, then remove this line again. Nobody's 2FA setup is deleted.
+      # SUMMITROAD_DISABLE_MFA: "1"
     volumes:
       - summitroad-data:/data
 

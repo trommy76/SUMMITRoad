@@ -27,6 +27,9 @@ FAIL_WINDOW = 600          # seconds
 MAX_FAILS_IP = 10          # failed logins per client IP within the window
 MAX_FAILS_USER = 30        # failed logins per username within the window (all IPs)
 RUN_UID = 10001
+# Emergency switch for lockouts: set SUMMITROAD_DISABLE_MFA=1 in docker-compose and restart. Sign-in becomes password-only
+# (no one's two-factor setup is deleted; remove the variable and it applies again).
+MFA_DISABLED = os.environ.get("SUMMITROAD_DISABLE_MFA", "0").strip().lower() in ("1", "true", "yes")
 SESSION_COOKIE = "sr_session"
 SESSION_LONG = 30 * 86400    # "keep me signed in"
 SESSION_SHORT = 12 * 3600
@@ -184,6 +187,11 @@ def mfa_enabled(username):
     return bool(row and row["enabled"])
 
 
+def mfa_required(username):
+    """Whether signing in as this user needs a second factor right now."""
+    return (not MFA_DISABLED) and mfa_enabled(username)
+
+
 def verify_totp(username, secret, code, now=None):
     """True if `code` is the current (+/- one 30 s step) code and has not been used before."""
     code = re.sub(r"\D", "", code or "")
@@ -308,7 +316,7 @@ def check_basic(username, password):
             return True
     ok = check_app_password(username, password)
     if not ok:
-        if mfa_enabled(username):
+        if mfa_required(username):
             time.sleep(0.5)
         else:
             ok = check_login(username, password)
@@ -567,9 +575,11 @@ class Handler(BaseHTTPRequestHandler):
             sys.stderr.write("AUTH FAIL ip=%s user=%r\n" % (ip, u[:40]))
             log_event(u[:40], ip, "browser", "login_failed")
             return self.send(401, {"error": "Wrong username or password."})
-        if mfa_enabled(u):                  # password was right: now ask for the 6-digit code
+        if mfa_required(u):                 # password was right: now ask for the 6-digit code
             return self.send(200, {"mfa": True, "ticket": make_ticket(u, bool(obj.get("remember")))})
-        return self.finish_login(u, bool(obj.get("remember")), ip, "signed in")
+        bypassed = MFA_DISABLED and mfa_enabled(u)
+        return self.finish_login(u, bool(obj.get("remember")), ip,
+                                 "signed in (2FA bypassed: disabled by server setting)" if bypassed else "signed in")
 
     def do_logout(self):
         if self.headers.get("X-Requested-With") != "SummitRoad":
@@ -612,7 +622,7 @@ class Handler(BaseHTTPRequestHandler):
         parts = parts[1:]
         with db() as c:
             if parts == ["ping"]:
-                return self.send(200, {"ok": True, "user": u, "server": VERSION, "admin": is_admin(u)})
+                return self.send(200, {"ok": True, "user": u, "server": VERSION, "admin": is_admin(u), "mfaOverride": MFA_DISABLED})
             if parts == ["rides"]:
                 if first_seen(("sync", u, self.client_ip(), self.client_kind()), 60):
                     self.ev(u, "sync" if self.client_kind() == "app" else "dashboard_view")
@@ -662,7 +672,7 @@ class Handler(BaseHTTPRequestHandler):
             if parts == ["mfa"]:
                 if not self.need_session():
                     return
-                return self.send(200, {"enabled": mfa_enabled(u), "recoveryLeft": recovery_left(u)})
+                return self.send(200, {"enabled": mfa_enabled(u), "recoveryLeft": recovery_left(u), "overridden": MFA_DISABLED})
             if parts == ["apppasswords"]:
                 if not self.need_session():
                     return
@@ -773,6 +783,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             ip = self.client_ip()
             if parts == ["api", "mfa", "setup"]:
+                if MFA_DISABLED:
+                    return self.send(409, {"error": "Two-factor is switched off by a server setting (SUMMITROAD_DISABLE_MFA)."})
                 if mfa_enabled(u):
                     return self.send(409, {"error": "two-factor is already on"})
                 secret = new_totp_secret()
@@ -806,7 +818,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(409, {"error": "two-factor is not on"})
                 if throttled(ip, u):
                     return self.send(429, {"error": "Too many failed attempts. Please wait a few minutes and try again."})
-                if not (check_login(u, str(obj.get("password", ""))) and verify_second_factor(u, str(obj.get("code", "")))):
+                needs_code = not (MFA_DISABLED and parts[2] == "disable")     # during the emergency switch, a password is enough to turn it off
+                if not (check_login(u, str(obj.get("password", ""))) and (not needs_code or verify_second_factor(u, str(obj.get("code", ""))))):
                     record_fail(ip, u)
                     log_event(u, ip, "browser", "mfa_failed", "wrong password or code on " + parts[2])
                     return self.send(403, {"error": "Your password or code was wrong."})
@@ -934,6 +947,7 @@ nav{display:flex;gap:4px;margin-left:12px}nav a{color:var(--mut);text-decoration
 </style></head><body>
 <header><div class="logo"><b>SUMMIT</b><span>ROAD</span></div><nav><a href="#" id="navDash">Dashboard</a><a href="#plan" id="navPlan">Training Plan</a><a href="#settings" id="navSettings">Settings</a></nav><div class="muted" id="who" style="margin-left:auto"></div><div class="muted" id="ver"></div><button onclick="logout()" title="Sign out of this browser">Sign out</button></header>
 <main>
+<div id="banner" style="display:none;background:#3a1d1d;border:1px solid #7a2e2e;color:#ffb4b4;border-radius:10px;padding:10px 14px;margin-bottom:16px"></div>
 <div id="pageDash">
 <div class="tiles" id="tiles"></div>
 <div class="grid"><div class="card"><h2>FTP history</h2><div id="ftp"></div></div>
@@ -1004,9 +1018,9 @@ async function loadMfa(){
   if($('usersCard').style.display==='block')loadUsers().catch(()=>{})}
 function renderMfa(m){
   $('mfaBody').className='';
-  $('mfaBody').innerHTML=m.enabled
-   ?'<p class="ok" style="margin-top:0">&#10003; Two-factor is on. '+m.recoveryLeft+' recovery code'+(m.recoveryLeft===1?'':'s')+' left.</p>'
-    +'<div class="muted" style="margin-bottom:8px">To change it, confirm with your password and a code from your app (or a recovery code).</div>'
+  $('mfaBody').innerHTML=m.overridden&&!m.enabled?'<p class="muted" style="margin-top:0">Two-factor is switched off by a server setting, so it can&rsquo;t be set up right now.</p>':m.enabled
+   ?(m.overridden?'<p class="err" style="margin-top:0">&#9888; Two-factor is set up, but currently <b>bypassed</b> by a server setting.</p>':'<p class="ok" style="margin-top:0">&#10003; Two-factor is on. '+m.recoveryLeft+' recovery code'+(m.recoveryLeft===1?'':'s')+' left.</p>')
+    +'<div class="muted" style="margin-bottom:8px">'+(m.overridden?'While the server setting is on, your password alone is enough to turn two-factor off.':'To change it, confirm with your password and a code from your app (or a recovery code).')+'</div>'
     +'<form class="row" onsubmit="return false" autocomplete="off"><input type="password" id="mfaPw" autocomplete="current-password" placeholder="Your password"><input type="text" id="mfaCode" inputmode="numeric" autocomplete="one-time-code" placeholder="Code" maxlength="12"></form>'
     +'<div class="row"><button type="button" onclick="mfaRecovery()">Make new recovery codes</button><button type="button" onclick="mfaDisable()" style="margin-left:6px">Turn off two-factor</button></div>'
    :'<p style="margin-top:0" class="muted">Adds a second step when you sign in: a 6-digit code from an app such as Google Authenticator, Microsoft Authenticator or Authy. The Mac app will then sign in with an app password instead of your normal password.</p><button type="button" onclick="mfaSetup()">Set up two-factor</button><div id="mfaSetup"></div>'}
@@ -1092,7 +1106,7 @@ function route(){const h=location.hash,pg=h==='#settings'?'settings':h==='#plan'
 window.addEventListener('hashchange',route);route();
 async function load(){
   const [rides,ftp,meInfo]=await Promise.all([api('/api/rides'),api('/api/ftp'),api('/api/ping')]);
-  me=meInfo.user;$('ver').textContent='server v'+meInfo.server;$('who').textContent='signed in as '+me+(meInfo.admin?' (admin)':'');if(meInfo.admin)loadUsers();initLog(meInfo.admin);
+  me=meInfo.user;if(meInfo.mfaOverride){$('banner').style.display='block';$('banner').innerHTML='&#9888; Two-factor sign-in is switched <b>off</b> by the server setting <code>SUMMITROAD_DISABLE_MFA</code>. Anyone with a password can sign in. Remove the setting from docker-compose and redeploy to turn two-factor back on.'}$('ver').textContent='server v'+meInfo.server;$('who').textContent='signed in as '+me+(meInfo.admin?' (admin)':'');if(meInfo.admin)loadUsers();initLog(meInfo.admin);
   const live=rides.filter(r=>!r.deleted);
   const tot=live.reduce((a,r)=>({s:a.s+r.durationSeconds,t:a.t+r.tss,k:a.k+r.kj}),{s:0,t:0,k:0});
   const cur=ftp.length?ftp[ftp.length-1].ftp:null;
@@ -1272,6 +1286,8 @@ def main():
         if c.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
             print("WARNING: no users exist. Set SUMMITROAD_USER and SUMMITROAD_PASSWORD, or run: "
                   "docker exec -it summitroad python server.py adduser NAME --admin")
+    if MFA_DISABLED:
+        print("WARNING: SUMMITROAD_DISABLE_MFA is set. Two-factor sign-in is OFF for everyone until you remove it.", flush=True)
     drop_privileges()
     threading.Thread(target=_event_worker, daemon=True).start()
     print("SummitRoad server %s listening on :%d (data: %s, uid %d, trust proxy: %s)"

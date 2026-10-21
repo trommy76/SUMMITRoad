@@ -58,6 +58,12 @@ then in the Mac app open Settings > Home Server, keep your username, paste the a
 Update Login. App passwords are random, shown only once, can be revoked individually, and can read and write your rides
 but cannot change your account, passwords or two-factor.
 
+**Locked out completely (emergency switch).** In `docker-compose.yml` uncomment `SUMMITROAD_DISABLE_MFA: "1"` and
+redeploy. While it is set, signing in needs only a password, the Mac app's normal password works again, and a red
+banner warns you on every page. Nobody's two-factor setup is deleted: remove the line and redeploy and two-factor
+applies again with the same app, secret and recovery codes. While the switch is on, setting up two-factor is blocked,
+and your password alone can turn your own two-factor off for good. Only someone who controls the Docker host can set it.
+
 **Lost phone?** Use a recovery code. If you have none, an admin can use **Reset 2FA** next to your name on the Users
 list, or from the command line: `docker exec -it summitroad python server.py resetmfa NAME`.
 
