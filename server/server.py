@@ -6,7 +6,7 @@ Standard library only. Data lives in $SUMMITROAD_DATA (default /data).
   python server.py adduser NAME [PASS] [--admin]  create a user or reset their password (prompts if PASS omitted)
   python server.py users                list users
 """
-import base64, getpass, hashlib, hmac, json, os, queue, re, secrets, sqlite3, sys, threading, time
+import base64, getpass, hashlib, hmac, http.cookies, json, os, queue, re, secrets, sqlite3, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -26,6 +26,9 @@ FAIL_WINDOW = 600          # seconds
 MAX_FAILS_IP = 10          # failed logins per client IP within the window
 MAX_FAILS_USER = 30        # failed logins per username within the window (all IPs)
 RUN_UID = 10001
+SESSION_COOKIE = "sr_session"
+SESSION_LONG = 30 * 86400    # "keep me signed in"
+SESSION_SHORT = 12 * 3600
 DOC_NAMES = ("plan", "settings")   # small synced documents: newest change wins
 LOG_KEEP_DAYS = 90         # activity log retention
 LOG_MAX_ROWS = 20000
@@ -42,6 +45,7 @@ CREATE TABLE IF NOT EXISTS rides (
   PRIMARY KEY (user, id));
 CREATE TABLE IF NOT EXISTS ftp (user TEXT, id TEXT, date TEXT, ftp REAL, method TEXT, PRIMARY KEY (user, id));
 CREATE TABLE IF NOT EXISTS docs (user TEXT, name TEXT, data TEXT, updated REAL, deleted INTEGER DEFAULT 0, PRIMARY KEY (user, name));
+CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user TEXT, created REAL, expires REAL, ip TEXT);
 CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, user TEXT, ip TEXT, client TEXT, type TEXT, detail TEXT);
 CREATE INDEX IF NOT EXISTS events_user ON events (user, id);
 """
@@ -188,6 +192,43 @@ def _event_worker():
             sys.stderr.write("event log write failed: %s\n" % e)
 
 
+def _tok_hash(token):
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def new_session(username, ip, ttl):
+    token = secrets.token_urlsafe(32)
+    now = time.time()
+    with db() as c:
+        c.execute("DELETE FROM sessions WHERE expires < ?", (now,))
+        c.execute("INSERT INTO sessions (token, user, created, expires, ip) VALUES (?,?,?,?,?)",
+                  (_tok_hash(token), username, now, now + ttl, ip))
+    return token
+
+
+def session_user(token):
+    if not token:
+        return None
+    with db() as c:
+        row = c.execute("SELECT user, expires FROM sessions WHERE token=?", (_tok_hash(token),)).fetchone()
+        if not row or row["expires"] < time.time():
+            return None
+        if not c.execute("SELECT 1 FROM users WHERE username=?", (row["user"],)).fetchone():
+            return None
+        return row["user"]
+
+
+def end_session(token):
+    if token:
+        with db() as c:
+            c.execute("DELETE FROM sessions WHERE token=?", (_tok_hash(token),))
+
+
+def end_user_sessions(username):
+    with db() as c:
+        c.execute("DELETE FROM sessions WHERE user=?", (username,))
+
+
 def ride_summary(row):
     if row["deleted"]:
         return {"id": row["id"], "deleted": True}
@@ -244,10 +285,30 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
-    def user(self):
+    def session_token(self):
+        raw = self.headers.get("Cookie", "")
+        if not raw:
+            return None
+        try:
+            jar = http.cookies.SimpleCookie(raw)
+            return jar[SESSION_COOKIE].value if SESSION_COOKIE in jar else None
+        except http.cookies.CookieError:
+            return None
+
+    def cookie_header(self, token, max_age=None):
+        parts = ["%s=%s" % (SESSION_COOKIE, token), "Path=/", "HttpOnly", "SameSite=Strict"]
+        if max_age is not None:
+            parts.append("Max-Age=%d" % max_age)
+        if "https" in (self.headers.get("X-Forwarded-Proto", "") + self.headers.get("CF-Visitor", "")).lower():
+            parts.append("Secure")
+        return "; ".join(parts)
+
+    def user(self, silent=False):
+        """The signed-in username, from a session cookie (browser) or HTTP Basic (the Mac app). With `silent`, an
+        unauthenticated request just returns None instead of sending an error."""
         # State-changing requests must carry a custom header. A web page on another site cannot add it without
         # a CORS preflight, which this server never allows, so forged cross-site requests are rejected.
-        if self.command in ("POST", "PUT", "DELETE") and self.headers.get("X-Requested-With") != "SummitRoad":
+        if not silent and self.command in ("POST", "PUT", "DELETE") and self.headers.get("X-Requested-With") != "SummitRoad":
             self.send(403, {"error": "missing X-Requested-With header"})
             return None
         ip = self.client_ip()
@@ -258,7 +319,8 @@ class Handler(BaseHTTPRequestHandler):
                 if throttled(ip, u):
                     if first_seen(("throttle", ip), 300):
                         log_event(u[:40], ip, self.client_kind(), "throttled", "too many failed logins")
-                    self.send(429, {"error": "too many failed logins, try again later"}, extra={"Retry-After": "300"})
+                    if not silent:
+                        self.send(429, {"error": "too many failed logins, try again later"}, extra={"Retry-After": "300"})
                     return None
                 if check_login(u, p):
                     if first_seen(("login", u, ip, self.client_kind()), 1800):
@@ -269,8 +331,49 @@ class Handler(BaseHTTPRequestHandler):
                 log_event(u[:40], ip, self.client_kind(), "login_failed")
             except Exception:
                 pass
-        self.send(401, {"error": "login required"}, extra={"WWW-Authenticate": 'Basic realm="SummitRoad", charset="UTF-8"'})
+        else:
+            su = session_user(self.session_token())
+            if su:
+                return su
+        if not silent:
+            self.send(401, {"error": "login required"})
         return None
+
+    def do_login(self):
+        if self.headers.get("X-Requested-With") != "SummitRoad":
+            return self.send(403, {"error": "missing X-Requested-With header"})
+        raw = self.body()
+        try:
+            obj = json.loads(raw or b"{}")
+            u, p = str(obj.get("username", "")).strip(), str(obj.get("password", ""))
+        except Exception:
+            return self.send(400, {"error": "bad request"})
+        ip = self.client_ip()
+        if throttled(ip, u):
+            if first_seen(("throttle", ip), 300):
+                log_event(u[:40], ip, "browser", "throttled", "too many failed logins")
+            return self.send(429, {"error": "Too many failed attempts. Please wait a few minutes and try again."},
+                             extra={"Retry-After": "300"})
+        if not (u and p and check_login(u, p)):
+            record_fail(ip, u)
+            sys.stderr.write("AUTH FAIL ip=%s user=%r\n" % (ip, u[:40]))
+            log_event(u[:40], ip, "browser", "login_failed")
+            return self.send(401, {"error": "Wrong username or password."})
+        long_session = bool(obj.get("remember"))
+        token = new_session(u, ip, SESSION_LONG if long_session else SESSION_SHORT)
+        log_event(u, ip, "browser", "login", "signed in" + (" (kept signed in)" if long_session else ""))
+        self.send(200, {"ok": True, "user": u},
+                  extra={"Set-Cookie": self.cookie_header(token, SESSION_LONG if long_session else None)})
+
+    def do_logout(self):
+        if self.headers.get("X-Requested-With") != "SummitRoad":
+            return self.send(403, {"error": "missing X-Requested-With header"})
+        token = self.session_token()
+        who = session_user(token)
+        end_session(token)
+        if who:
+            log_event(who, self.client_ip(), "browser", "logout")
+        self.send(200, {"ok": True}, extra={"Set-Cookie": self.cookie_header("", 0)})
 
     def body(self):
         try:
@@ -291,11 +394,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parts = self.route()
+        if not parts:                     # the page itself: dashboard when signed in, otherwise the sign-in page
+            return self.send(200, DASHBOARD if self.user(silent=True) else LOGIN_PAGE, "text/html; charset=utf-8")
         u = self.user()
         if not u:
             return
-        if not parts:
-            return self.send(200, DASHBOARD, "text/html; charset=utf-8")
         if parts[:1] != ["api"]:
             return self.send(404, {"error": "not found"})
         parts = parts[1:]
@@ -416,6 +519,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parts = self.route()
+        if parts == ["api", "login"]:
+            return self.do_login()
+        if parts == ["api", "logout"]:
+            return self.do_logout()
         u = self.user()
         if not u:
             return
@@ -434,8 +541,9 @@ class Handler(BaseHTTPRequestHandler):
             if len(new) < MIN_PW:
                 return self.send(400, {"error": "new password must be at least %d characters" % MIN_PW})
             set_user(u, new)
+            end_user_sessions(u)                      # everyone signed in as this user has to sign in again
             self.ev(u, "password_changed")
-            return self.send(200, {"ok": True})
+            return self.send(200, {"ok": True, "signedOut": True}, extra={"Set-Cookie": self.cookie_header("", 0)})
         if parts[:2] == ["api", "users"]:
             if not is_admin(u):
                 return self.send(403, {"error": "admin only"})
@@ -459,6 +567,7 @@ class Handler(BaseHTTPRequestHandler):
                     if not c.execute("SELECT 1 FROM users WHERE username=?", (name,)).fetchone():
                         return self.send(404, {"error": "no such user"})
                 set_user(name, pw)
+                end_user_sessions(name)
                 self.ev(u, "password_reset", "for " + name)
                 return self.send(200, {"ok": True})
         self.send(404, {"error": "not found"})
@@ -478,6 +587,7 @@ class Handler(BaseHTTPRequestHandler):
                 c.execute("DELETE FROM rides WHERE user=?", (name,))
                 c.execute("DELETE FROM ftp WHERE user=?", (name,))
                 c.execute("DELETE FROM docs WHERE user=?", (name,))
+                c.execute("DELETE FROM sessions WHERE user=?", (name,))
                 cur = c.execute("DELETE FROM users WHERE username=?", (name,))
             forget_logins()
             if cur.rowcount:
@@ -500,7 +610,7 @@ DASHBOARD = r"""<!doctype html>
 <style>
 :root{--bg:#0e0e10;--card:#1b1b1f;--line:#2c2c33;--fg:#ececf0;--mut:#8b8b96;--accent:#9e52f2;--green:#4cc38a}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px -apple-system,system-ui,sans-serif}
-header{display:flex;align-items:baseline;gap:12px;padding:18px 24px;border-bottom:1px solid var(--line)}
+header{display:flex;align-items:center;gap:12px;padding:18px 24px;border-bottom:1px solid var(--line)}
 .logo{font-size:22px;font-style:italic}.logo b{color:var(--accent);font-weight:800}.logo span{font-weight:300}
 main{max-width:1100px;margin:0 auto;padding:20px 24px 60px}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px}
@@ -519,7 +629,7 @@ nav{display:flex;gap:4px;margin-left:12px}nav a{color:var(--mut);text-decoration
 .tip{position:absolute;pointer-events:none;display:none;background:#25252b;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.55;white-space:nowrap;z-index:5}
 .fb li{margin:4px 0}button{background:#2c2c33;color:var(--fg);border:0;border-radius:6px;padding:6px 12px;cursor:pointer}
 </style></head><body>
-<header><div class="logo"><b>SUMMIT</b><span>ROAD</span></div><nav><a href="#" id="navDash">Dashboard</a><a href="#plan" id="navPlan">Training Plan</a><a href="#settings" id="navSettings">Settings</a></nav><div class="muted" id="who" style="margin-left:auto"></div><div class="muted" id="ver"></div></header>
+<header><div class="logo"><b>SUMMIT</b><span>ROAD</span></div><nav><a href="#" id="navDash">Dashboard</a><a href="#plan" id="navPlan">Training Plan</a><a href="#settings" id="navSettings">Settings</a></nav><div class="muted" id="who" style="margin-left:auto"></div><div class="muted" id="ver"></div><button onclick="logout()" title="Sign out of this browser">Sign out</button></header>
 <main>
 <div id="pageDash">
 <div class="tiles" id="tiles"></div>
@@ -534,12 +644,12 @@ nav{display:flex;gap:4px;margin-left:12px}nav a{color:var(--mut);text-decoration
 <div class="tiles" id="planTiles"></div><div id="planWeeks"></div></div>
 <div id="pageSettings" style="display:none"><h1 style="font-size:22px;margin:0 0 16px">Settings</h1>
 <div class="card"><h2>Change password</h2>
-<div class="row"><input type="password" id="pwold" placeholder="Current password"><input type="password" id="pwnew" placeholder="New password (min 10)"><input type="password" id="pwnew2" placeholder="Repeat new password"><button onclick="changePw()">Change password</button></div>
+<form class="row" onsubmit="changePw();return false"><input type="text" autocomplete="username" style="display:none" tabindex="-1" aria-hidden="true"><input type="password" id="pwold" autocomplete="current-password" placeholder="Current password" required><input type="password" id="pwnew" autocomplete="new-password" placeholder="New password (min 10)" required><input type="password" id="pwnew2" autocomplete="new-password" placeholder="Repeat new password" required><button type="submit">Change password</button></form>
 <div id="pwmsg" class="msg"></div></div>
 <div class="card" id="usersCard" style="display:none;margin-top:20px"><h2>Users (admin)</h2>
 <div class="scroll"><table><thead><tr><th>User</th><th>Role</th><th>Rides</th><th></th></tr></thead><tbody id="users"></tbody></table></div>
 <h2 style="margin-top:16px">Add a user</h2>
-<div class="row"><input type="text" id="nuname" placeholder="Username"><input type="password" id="nupw" placeholder="Password (min 10)"><label class="muted" style="margin-right:10px"><input type="checkbox" id="nuadmin"> admin</label><button onclick="addUser()">Add user</button></div>
+<form class="row" onsubmit="addUser();return false" autocomplete="off"><input type="text" id="nuname" autocomplete="off" placeholder="Username" required><input type="password" id="nupw" autocomplete="new-password" placeholder="Password (min 10)" required><label class="muted" style="margin-right:10px"><input type="checkbox" id="nuadmin"> admin</label><button type="submit">Add user</button></form>
 <div id="umsg" class="msg"></div></div>
 
 
@@ -556,15 +666,16 @@ const fmtT=s=>{s=Math.round(s);const h=Math.floor(s/3600),m=Math.floor(s%3600/60
 const fmtD=d=>new Date(d).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
 function line(pts,w,h,color,pad){ // pts: [[x,y]] already scaled to 0..1
   return '<polyline fill="none" stroke="'+color+'" stroke-width="2" points="'+pts.map(p=>(pad+p[0]*(w-2*pad)).toFixed(1)+','+(h-pad-p[1]*(h-2*pad)).toFixed(1)).join(' ')+'"/>'}
-async function api(p){const r=await fetch(location.origin+p);if(!r.ok)throw new Error(p+' '+r.status);return r.json()}
+async function api(p){const r=await fetch(location.origin+p);if(r.status===401){location.reload();throw new Error('signed out')}if(!r.ok)throw new Error(p+' '+r.status);return r.json()}
+async function logout(){try{await call('POST','/api/logout')}catch(e){}location.href='/'}
 async function call(method,p,body){const r=await fetch(location.origin+p,{method,headers:{'Content-Type':'application/json','X-Requested-With':'SummitRoad'},body:body?JSON.stringify(body):undefined});
-  let j={};try{j=await r.json()}catch(e){}if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j}
+  let j={};try{j=await r.json()}catch(e){}if(r.status===401){location.reload();throw new Error('signed out')}if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j}
 function say(id,text,good){const e=$(id);e.textContent=text;e.className='msg '+(good?'ok':'err')}
 async function changePw(){
   const o=$('pwold').value,n=$('pwnew').value;
   if(n!==$('pwnew2').value)return say('pwmsg','The new passwords do not match.');
   try{await call('POST','/api/password',{old:o,new:n});['pwold','pwnew','pwnew2'].forEach(i=>$(i).value='');
-    say('pwmsg','Password changed. Your browser may ask you to sign in again, and the SummitRoad app needs the new password (Settings > Home Server > Update Login).',true)}
+    say('pwmsg','Password changed. Signing you out so you can sign in with the new one. The SummitRoad app needs the new password too (Settings > Home Server > Update Login).',true);setTimeout(()=>location.href='/',3500)}
   catch(e){say('pwmsg',e.message)}}
 async function loadUsers(){
   const us=await api('/api/users');$('usersCard').style.display='block';
@@ -584,7 +695,7 @@ async function delUser(name){
   try{await call('DELETE','/api/users/'+encodeURIComponent(name));say('umsg','Deleted '+name+'.',true);loadUsers()}
   catch(e){say('umsg',e.message)}}
 let me='';
-const EV={login:'Signed in',login_failed:'Failed sign-in',throttled:'Blocked (too many failures)',sync:'App synced',dashboard_view:'Viewed dashboard',ride_added:'Ride uploaded',ride_updated:'Ride updated',ride_deleted:'Ride deleted',plan_updated:'Training plan synced',plan_cleared:'Training plan cleared',settings_updated:'Settings synced',ftp_added:'FTP result added',password_changed:'Password changed',password_change_failed:'Password change failed',password_reset:'Password reset',user_added:'User added',user_deleted:'User deleted'};
+const EV={login:'Signed in',login_failed:'Failed sign-in',throttled:'Blocked (too many failures)',sync:'App synced',dashboard_view:'Viewed dashboard',ride_added:'Ride uploaded',ride_updated:'Ride updated',ride_deleted:'Ride deleted',logout:'Signed out',plan_updated:'Training plan synced',plan_cleared:'Training plan cleared',settings_updated:'Settings synced',ftp_added:'FTP result added',password_changed:'Password changed',password_change_failed:'Password change failed',password_reset:'Password reset',user_added:'User added',user_deleted:'User deleted'};
 const KIND={endurance:'Endurance',tempo:'Tempo',sweetSpot:'Sweet Spot',threshold:'Threshold',overUnder:'Over-Unders',vo2:'VO2 Max',vo2OnOff:'VO2 Max On-Offs',ftpRamp:'FTP Ramp Test',ftp20:'FTP 20-Minute Test',adhoc:'Workout'};
 const GOAL={raiseFTP:'Raise my FTP',timeTrial:'Time trial / sustained power',roadRace:'Road race / criterium',century:'Century / long event',general:'General fitness'};
 const PHASE={base:'Base',build:'Build',specialty:'Specialty'};
@@ -680,6 +791,67 @@ async function show(id){
   $('detail').scrollIntoView({behavior:'smooth'});
 }
 load().catch(e=>{$('tiles').innerHTML='<div class="tile">Could not load: '+esc(e.message)+'</div>'});
+</script></body></html>"""
+
+
+LOGIN_PAGE = r"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in · SummitRoad</title>
+<style>
+:root{--bg:#0b0b0e;--card:#17171c;--line:#2c2c35;--fg:#ececf0;--mut:#8b8b96;--accent:#9e52f2;--err:#ff6b6f}
+*{box-sizing:border-box}html,body{height:100%}
+body{margin:0;background:radial-gradient(900px 500px at 50% -10%,#2a1650 0%,transparent 70%),var(--bg);color:var(--fg);
+  font:15px -apple-system,system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;position:relative;overflow:hidden}
+.road{position:absolute;left:0;bottom:0;width:100%;height:46%;opacity:.5;pointer-events:none}
+.wrap{position:relative;width:100%;max-width:400px}
+.logo{text-align:center;font-size:38px;font-style:italic;letter-spacing:.5px;margin-bottom:6px}
+.logo b{color:var(--accent);font-weight:800}.logo span{font-weight:300}
+.tag{text-align:center;color:var(--mut);margin-bottom:26px}
+.card{background:rgba(23,23,28,.92);border:1px solid var(--line);border-radius:16px;padding:26px;box-shadow:0 20px 60px rgba(0,0,0,.5);backdrop-filter:blur(6px)}
+label{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:0 0 6px}
+.field{position:relative;margin-bottom:16px}
+input[type=text],input[type=password]{width:100%;background:#0f0f13;color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:16px;outline:none}
+input[type=text]:focus,input[type=password]:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(158,82,242,.25)}
+.eye{position:absolute;right:8px;top:30px;background:none;border:0;color:var(--mut);cursor:pointer;font-size:13px;padding:6px 8px}
+.row{display:flex;align-items:center;gap:8px;margin:2px 0 18px;color:var(--mut);font-size:14px}
+button.go{width:100%;border:0;border-radius:10px;padding:13px;font-size:16px;font-weight:600;color:#fff;cursor:pointer;
+  background:linear-gradient(135deg,#9e52f2,#7b3fe0)}
+button.go:hover{filter:brightness(1.1)}button.go:disabled{opacity:.6;cursor:default}
+.err{color:var(--err);min-height:20px;font-size:14px;margin-top:14px;text-align:center}
+.foot{text-align:center;color:#55555f;font-size:12px;margin-top:18px}
+</style></head><body>
+<svg class="road" viewBox="0 0 800 300" preserveAspectRatio="none" aria-hidden="true">
+  <polygon points="-40,300 840,300 450,0 350,0" fill="#1c1c22"/>
+  <polyline points="40,300 345,0" stroke="#3a3a44" stroke-width="3" fill="none"/>
+  <polyline points="760,300 455,0" stroke="#3a3a44" stroke-width="3" fill="none"/>
+  <g fill="#9e52f2" opacity=".8"><polygon points="394,0 406,0 410,40 390,40"/><polygon points="386,70 414,70 424,150 376,150"/><polygon points="370,190 430,190 460,300 340,300"/></g>
+</svg>
+<div class="wrap">
+  <div class="logo"><b>SUMMIT</b><span>ROAD</span></div>
+  <div class="tag">Your training, at home.</div>
+  <form class="card" id="f" onsubmit="return go(event)" autocomplete="on">
+    <div class="field"><label for="u">Username</label><input type="text" id="u" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" autofocus required></div>
+    <div class="field"><label for="p">Password</label><input type="password" id="p" name="password" autocomplete="current-password" required>
+      <button type="button" class="eye" id="eye" onclick="toggle()">Show</button></div>
+    <div class="row"><input type="checkbox" id="r" checked><label for="r" style="margin:0;text-transform:none;letter-spacing:0;font-size:14px">Keep me signed in on this device</label></div>
+    <button class="go" id="b" type="submit">Sign in</button>
+    <div class="err" id="e" role="alert"></div>
+  </form>
+  <div class="foot">SummitRoad home server</div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+function toggle(){const p=$('p'),show=p.type==='password';p.type=show?'text':'password';$('eye').textContent=show?'Hide':'Show'}
+async function go(ev){
+  ev.preventDefault();$('e').textContent='';$('b').disabled=true;$('b').textContent='Signing in…';
+  try{
+    const r=await fetch(location.origin+'/api/login',{method:'POST',headers:{'Content-Type':'application/json','X-Requested-With':'SummitRoad'},
+      body:JSON.stringify({username:$('u').value,password:$('p').value,remember:$('r').checked})});
+    let j={};try{j=await r.json()}catch(x){}
+    if(r.ok){location.href='/';return}
+    $('e').textContent=j.error||('Sign-in failed ('+r.status+')');$('p').select()
+  }catch(x){$('e').textContent='Could not reach the server.'}
+  $('b').disabled=false;$('b').textContent='Sign in';return false}
 </script></body></html>"""
 
 

@@ -35,6 +35,15 @@ After that:
 
 macOS only allows plain `http://` to local addresses: use an IP address, a `.local` name or a name without dots.
 
+## Signing in and out
+
+Browsers get a sign-in page (username, password, "keep me signed in on this device" for 30 days; otherwise the
+session lasts 12 hours). Use **Sign out** at the top right of the dashboard to end the session on the server. Sessions
+are stored in the server's database as a hash and sent as a secure `HttpOnly`, `SameSite=Strict` cookie (also
+`Secure` when the request came in over HTTPS). Changing or resetting a password, or deleting a user, signs that user out
+everywhere. The SummitRoad Mac app does not use cookies: it keeps sending its username and password with each
+request, so it is unaffected.
+
 ## Users and passwords
 
 The user in `docker-compose.yml` (`SUMMITROAD_USER`) is the **admin**. Sign in to the dashboard in a browser:
