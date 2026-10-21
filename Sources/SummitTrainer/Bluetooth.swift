@@ -32,6 +32,7 @@ struct LiveReading {
     var power: Int?
     var hr: Int?
     var cadence: Int?
+    var speed: Double?        // km/h
 }
 
 /// Handles Bluetooth LE: FTMS smart trainers (Elite Suito, Wahoo KICKR, Tacx, Saris, JetBlack...),
@@ -68,6 +69,7 @@ final class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
     // latest values with timestamps
     private var power: Int?, powerAt = Date.distantPast
     private var cadence: Int?, cadenceAt = Date.distantPast
+    private var speed: Double?, speedAt = Date.distantPast
     private var trainerHR: Int?, trainerHRAt = Date.distantPast
     private var strapHR: Int?, strapHRAt = Date.distantPast
     private var lastCrank: (revs: Int, time: Int, at: Date)?
@@ -176,6 +178,7 @@ final class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
         var r = LiveReading()
         if now.timeIntervalSince(powerAt) < 4 { r.power = power }
         if now.timeIntervalSince(cadenceAt) < 4 { r.cadence = cadence }
+        if now.timeIntervalSince(speedAt) < 4 { r.speed = speed }
         if now.timeIntervalSince(strapHRAt) < 4 {
             r.hr = strapHR
         } else if now.timeIntervalSince(trainerHRAt) < 4 {
@@ -364,7 +367,8 @@ final class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
             i += 2
             return v
         }
-        if flags & 0x0001 == 0 { _ = u16() }                       // instantaneous speed
+        var spd: Double?
+        if flags & 0x0001 == 0, let v = u16() { spd = Double(v) / 100.0 }   // instantaneous speed, 0.01 km/h
         if flags & 0x0002 != 0 { i += 2 }                          // average speed
         var cad: Double?
         if flags & 0x0004 != 0, let v = u16() { cad = Double(v) / 2.0 }
@@ -381,6 +385,7 @@ final class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
         let now = Date()
         if let pw = pw { power = max(0, pw); powerAt = now }
         if let c = cad { cadence = Int(c.rounded()); cadenceAt = now }
+        if let v = spd { speed = v; speedAt = now }
         if let h = hr, h > 0 { trainerHR = h; trainerHRAt = now }
     }
 

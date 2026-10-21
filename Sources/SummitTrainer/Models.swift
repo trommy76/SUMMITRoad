@@ -189,6 +189,7 @@ struct Sample: Codable {
     var target: Int?
     var kind: SegmentKind
     var seg: Int
+    var speed: Double?        // km/h as reported by the trainer (nil on rides recorded before this was captured)
 }
 
 struct ScoreBreakdown: Codable {

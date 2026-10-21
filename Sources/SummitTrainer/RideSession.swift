@@ -186,7 +186,7 @@ final class RideSession: ObservableObject {
 
         // Ad-hoc rides are scored against the intensity the rider chose; plan rides keep the planned target.
         let recorded = workout.kind == .adhoc ? targetPower : base
-        samples.append(Sample(t: elapsed, power: power, hr: hr, cad: cadence, target: recorded, kind: seg.kind, seg: segIndex))
+        samples.append(Sample(t: elapsed, power: power, hr: hr, cad: cadence, target: recorded, kind: seg.kind, seg: segIndex, speed: r.speed))
         updateMetrics()
 
         elapsed += 1
