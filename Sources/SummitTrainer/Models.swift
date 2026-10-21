@@ -247,8 +247,12 @@ struct Profile: Codable {
     var syncURL: String?
     var syncUser: String?
     var syncUploadOK: Bool?
-    var planUpdatedAt: Double?        // epoch seconds of the last local plan change (used to sync the plan)
+    var planUpdatedAt: Double?        // epoch seconds of the last local plan change
     var settingsUpdatedAt: Double?    // same, for maxHR / voice cues / auto-upload
+    var planRev: Int?                 // the server revision of the plan this Mac last synced
+    var settingsRev: Int?
+    var planDirty: Bool?              // true while this Mac has plan changes the server has not accepted yet
+    var settingsDirty: Bool?
 }
 
 // MARK: - Metrics

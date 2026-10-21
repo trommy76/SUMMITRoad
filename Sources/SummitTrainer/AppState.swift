@@ -7,6 +7,8 @@ final class Store: ObservableObject {
         if !loading && !applyingRemote && (oldValue.maxHR != profile.maxHR || oldValue.voiceCues != profile.voiceCues
                                           || oldValue.autoUpload != profile.autoUpload) {
             profile.settingsUpdatedAt = Date().timeIntervalSince1970
+            profile.settingsDirty = true
+            settingsChangeCount += 1
             onSettingsChanged?()
         }
         write(profile, "profile.json")
@@ -14,10 +16,19 @@ final class Store: ObservableObject {
     @Published var plan: TrainingPlan? { didSet {
         if !loading && !applyingRemote {
             profile.planUpdatedAt = Date().timeIntervalSince1970
+            profile.planDirty = true
+            planChangeCount += 1
             onPlanChanged?()
         }
-        if let p = plan { write(p, "plan.json") } else { remove("plan.json") }
+        if !loading { if let p = plan { write(p, "plan.json") } else { remove("plan.json") } }
     } }
+    @Published var hasPreviousPlan = false
+    /// Unsent plan changes. A plan edited under an older version (timestamp but no revision record) counts as unsent, so
+    /// updating can never quietly replace it with an older copy from the server.
+    var planIsDirty: Bool { profile.planDirty ?? (profile.planRev == nil && profile.planUpdatedAt != nil) }
+    var settingsIsDirty: Bool { profile.settingsDirty ?? (profile.settingsRev == nil && profile.settingsUpdatedAt != nil) }
+    var planChangeCount = 0               // counts local plan edits so a finished push only clears "unsent" if nothing changed meanwhile
+    var settingsChangeCount = 0
     @Published var rides: [RideSummary] = []
 
     /// Hooks used by the optional home-server sync.
@@ -58,31 +69,53 @@ final class Store: ObservableObject {
                 .compactMap { try? decoder.decode(RideSummary.self, from: Data(contentsOf: $0)) }
                 .sorted { $0.date > $1.date }
         }
+        hasPreviousPlan = FileManager.default.fileExists(atPath: dir.appendingPathComponent("plan.previous.json").path)
         loading = false
     }
 
-    /// When the plan last changed. Plans saved before sync existed use the file's modification time.
-    var planTimestamp: Double {
-        if let t = profile.planUpdatedAt { return t }
-        guard plan != nil else { return 0 }
-        let attrs = try? FileManager.default.attributesOfItem(atPath: dir.appendingPathComponent("plan.json").path)
-        return (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
-    }
-
-    func applyRemote(plan newPlan: TrainingPlan?, updated: Double) {
+    /// Adopt the server's plan. If this Mac had unsent changes they are kept as the "previous plan" so nothing is lost.
+    func applyRemote(plan newPlan: TrainingPlan?, rev: Int, updated: Double) {
+        if let local = plan, planIsDirty { backupPreviousPlan(local) }
         applyingRemote = true
         plan = newPlan
+        profile.planRev = rev
         profile.planUpdatedAt = updated
+        profile.planDirty = false
         applyingRemote = false
     }
 
-    func applyRemote(maxHR: Int, voiceCues: Bool, autoUpload: Bool, updated: Double) {
+    func markPlanPushed(rev: Int, changeCount: Int) {
+        profile.planRev = rev
+        if planChangeCount == changeCount { profile.planDirty = false }
+    }
+
+    func applyRemote(maxHR: Int, voiceCues: Bool, autoUpload: Bool, rev: Int, updated: Double) {
         applyingRemote = true
         profile.maxHR = maxHR
         profile.voiceCues = voiceCues
         profile.autoUpload = autoUpload
+        profile.settingsRev = rev
         profile.settingsUpdatedAt = updated
+        profile.settingsDirty = false
         applyingRemote = false
+    }
+
+    func markSettingsPushed(rev: Int, changeCount: Int) {
+        profile.settingsRev = rev
+        if settingsChangeCount == changeCount { profile.settingsDirty = false }
+    }
+
+    private func backupPreviousPlan(_ p: TrainingPlan) {
+        write(p, "plan.previous.json")
+        hasPreviousPlan = true
+    }
+
+    /// Brings back the plan this Mac replaced when it took the server's version. It counts as a new edit and syncs.
+    func restorePreviousPlan() {
+        guard let p: TrainingPlan = read("plan.previous.json") else { return }
+        plan = p
+        remove("plan.previous.json")
+        hasPreviousPlan = false
     }
 
     private func write<T: Encodable>(_ v: T, _ name: String) {
@@ -148,6 +181,8 @@ final class AppState: ObservableObject {
             await self?.updater.check(silent: true)
             await self?.sync.autoSync()
         }
+        sync.isRiding = { [weak self] in self?.session != nil }
+        sync.startAutoPull()
         ble.reconnectKnown(trainerID: store.profile.trainerID, hrID: store.profile.hrID)
     }
 

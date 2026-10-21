@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 /// Optional sync with a SummitRoad home server (see /server). Rides, .FIT files and FTP history are kept per user.
 /// Rides never change once saved, so syncing is "add whatever the other side is missing", plus delete markers.
@@ -8,6 +9,10 @@ final class SyncClient: ObservableObject {
     @Published var busy = false
     @Published var lastSync: Date?
     @Published var serverVersion: String?
+    @Published var planConflict = false      // the plan changed on this Mac and on the server: waiting for the user to choose
+    var isRiding: () -> Bool = { false }
+    private var pullTask: Task<Void, Never>?
+    private var lastAutoPull = Date.distantPast
 
     private let store: Store
     private var settingsPush: Task<Void, Never>?
@@ -155,8 +160,30 @@ final class SyncClient: ObservableObject {
 
     func autoSync() async {
         guard configured else { return }
+        lastAutoPull = Date()
         await refreshServerVersion()
         await syncAll(upload: store.profile.syncUploadOK == true, download: true, quiet: true)
+    }
+
+    /// Keeps this Mac current while the app stays open: checks the server every few minutes and whenever the app comes
+    /// to the front. Skipped during a ride so the plan never changes underneath you.
+    func startAutoPull() {
+        let seconds = Double(ProcessInfo.processInfo.environment["SUMMITROAD_SYNC_INTERVAL"] ?? "") ?? 300
+        pullTask?.cancel()
+        pullTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(max(1, seconds) * 1_000_000_000))
+                await self?.backgroundPull(minGap: 0)
+            }
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in await self?.backgroundPull(minGap: 60) }
+        }
+    }
+
+    private func backgroundPull(minGap: TimeInterval) async {
+        guard configured, !busy, !isRiding(), Date().timeIntervalSince(lastAutoPull) >= minGap else { return }
+        await autoSync()
     }
 
     private func refreshServerVersion() async {
@@ -238,13 +265,14 @@ final class SyncClient: ObservableObject {
             }
 
             try await syncFTP(upload: upload, download: download, up: &up, down: &down)
-            await syncDocs(upload: upload, download: download)
+            let notes = await syncDocs(upload: upload, download: download)
             lastSync = Date()
             var parts: [String] = []
             if up > 0 { parts.append("uploaded \(up)") }
             if down > 0 { parts.append("downloaded \(down)") }
             if removed > 0 { parts.append("removed \(removed) deleted") }
             if failed > 0 { parts.append("\(failed) failed") }
+            parts += notes
             if !quiet || !parts.isEmpty || failed > 0 {
                 status = "Sync complete: " + (parts.isEmpty ? "everything is up to date." : parts.joined(separator: ", ") + ".")
             }
@@ -253,7 +281,13 @@ final class SyncClient: ObservableObject {
         }
     }
 
-    // MARK: Plan and settings (one small document each; the newest change wins)
+    // MARK: Plan and settings: versioned documents
+    //
+    // The server numbers every saved version. A Mac remembers the revision it last synced and whether it has changes
+    // the server hasn't seen. That gives three cases, so nothing is overwritten by accident:
+    //   server unchanged, Mac changed  -> send the change (the server checks the revision it was based on)
+    //   server changed, Mac unchanged  -> take the server's version
+    //   both changed                   -> a conflict: keep both and ask (plan), or newest edit wins (settings)
 
     struct SettingsDoc: Codable {
         var maxHR: Int
@@ -262,6 +296,7 @@ final class SyncClient: ObservableObject {
     }
     private struct DocIn<T: Decodable>: Decodable {
         let updated: Double
+        let rev: Int?
         let deleted: Bool?
         let data: T?
     }
@@ -269,8 +304,14 @@ final class SyncClient: ObservableObject {
         let updated: Double
         let deleted: Bool
         let data: T?
+        let baseRev: Int
+        let force: Bool
+        let device: String
     }
-    private struct PutResult: Decodable { let applied: Bool }
+    private struct PutReply: Decodable { let rev: Int? }
+    private enum PutResult { case applied(Int), conflict }
+
+    private var deviceName: String { Host.current().localizedName ?? ProcessInfo.processInfo.hostName }
 
     private func fetchDoc<T: Decodable>(_ name: String, as: T.Type) async throws -> DocIn<T>? {
         let (d, code) = try await send("GET", "api/docs/\(name)")
@@ -279,69 +320,152 @@ final class SyncClient: ObservableObject {
         return try decoder.decode(DocIn<T>.self, from: d)
     }
 
-    private func putDoc<T: Encodable>(_ name: String, updated: Double, deleted: Bool, data: T?) async throws -> Bool {
-        let (d, code) = try await send("PUT", "api/docs/\(name)", body: try encoder.encode(DocOut(updated: updated, deleted: deleted, data: data)))
+    private func putDoc<T: Encodable>(_ name: String, updated: Double, deleted: Bool, data: T?, baseRev: Int, force: Bool = false) async throws -> PutResult {
+        let body = try encoder.encode(DocOut(updated: updated, deleted: deleted, data: data, baseRev: baseRev, force: force, device: deviceName))
+        let (d, code) = try await send("PUT", "api/docs/\(name)", body: body)
+        if code == 409 { return .conflict }
         guard (200..<300).contains(code) else { throw SyncError.http(code) }
-        return (try? decoder.decode(PutResult.self, from: d))?.applied ?? true
+        return .applied((try? decoder.decode(PutReply.self, from: d))?.rev ?? baseRev + 1)
     }
 
     private var currentSettings: SettingsDoc {
         SettingsDoc(maxHR: store.profile.maxHR, voiceCues: store.profile.voiceCues, autoUpload: store.profile.autoUpload)
     }
 
+    private func conflictMessage() {
+        status = "Your training plan was also changed on another Mac. Nothing was overwritten. Open Settings > Home Server to choose which to keep."
+    }
+
     private func pushPlan() async {
         do {
-            let ts = store.planTimestamp
-            if try await !putDoc("plan", updated: ts, deleted: store.plan == nil, data: store.plan) {
-                await syncDocs(upload: false, download: true)       // the server has a newer plan
+            let count = store.planChangeCount
+            let result = try await putDoc("plan", updated: store.profile.planUpdatedAt ?? Date().timeIntervalSince1970,
+                                          deleted: store.plan == nil, data: store.plan, baseRev: store.profile.planRev ?? 0)
+            switch result {
+            case .applied(let rev):
+                store.markPlanPushed(rev: rev, changeCount: count)
+                planConflict = false
+            case .conflict:
+                planConflict = true
+                conflictMessage()
             }
         } catch { status = "Sync failed: \(error.localizedDescription)" }
     }
 
     private func pushSettings() async {
         do {
-            let ts = store.profile.settingsUpdatedAt ?? Date().timeIntervalSince1970
-            if try await !putDoc("settings", updated: ts, deleted: false, data: currentSettings) {
-                await syncDocs(upload: false, download: true)
+            let count = store.settingsChangeCount
+            let result = try await putDoc("settings", updated: store.profile.settingsUpdatedAt ?? Date().timeIntervalSince1970,
+                                          deleted: false, data: currentSettings, baseRev: store.profile.settingsRev ?? 0)
+            switch result {
+            case .applied(let rev): store.markSettingsPushed(rev: rev, changeCount: count)
+            case .conflict: _ = await syncDocs(upload: false, download: true)      // sort it out with the rule for settings
             }
         } catch { status = "Sync failed: \(error.localizedDescription)" }
     }
 
-    /// `upload` also sends plan/settings that predate sync and have never been changed since.
-    private func syncDocs(upload: Bool, download: Bool) async {
+    /// The user chose the server's plan in a conflict. This Mac's version is kept as the "previous plan".
+    func keepServerPlan() async {
         do {
-            // Plan
-            let localPlan = store.planTimestamp
-            let userMadePlan = store.profile.planUpdatedAt != nil
-            if let r = try await fetchDoc("plan", as: TrainingPlan.self) {
-                if r.updated > localPlan {
-                    if download { store.applyRemote(plan: r.deleted == true ? nil : r.data, updated: r.updated) }
-                } else if localPlan > r.updated && (userMadePlan || upload) {
-                    _ = try await putDoc("plan", updated: localPlan, deleted: store.plan == nil, data: store.plan)
+            guard let r = try await fetchDoc("plan", as: TrainingPlan.self) else { return }
+            store.applyRemote(plan: r.deleted == true ? nil : r.data, rev: r.rev ?? 1, updated: r.updated)
+            planConflict = false
+            status = "Using the server's plan. The version on this Mac was kept: Settings > Home Server > Restore the plan this Mac replaced."
+        } catch { status = "Sync failed: \(error.localizedDescription)" }
+    }
+
+    /// The user chose this Mac's plan in a conflict. The server keeps the version it replaces in its history.
+    func useThisMacsPlan() async {
+        do {
+            let count = store.planChangeCount
+            if case .applied(let rev) = try await putDoc("plan", updated: Date().timeIntervalSince1970, deleted: store.plan == nil, data: store.plan,
+                                                         baseRev: store.profile.planRev ?? 0, force: true) {
+                store.markPlanPushed(rev: rev, changeCount: count)
+                planConflict = false
+                status = "This Mac's plan is now the server's plan. The other version is in the website's version history."
+            }
+        } catch { status = "Sync failed: \(error.localizedDescription)" }
+    }
+
+    /// `upload` also sends a plan or settings that predate sync and have never been changed since (only if the server has none).
+    private func syncDocs(upload: Bool, download: Bool) async -> [String] {
+        var notes: [String] = []
+        do {
+            // ----- Plan
+            let remotePlan = try await fetchDoc("plan", as: TrainingPlan.self)
+            let planDirty = store.planIsDirty
+            let planRev = store.profile.planRev ?? 0
+            if let r = remotePlan {
+                let remoteRev = r.rev ?? 1
+                if remoteRev == planRev {
+                    planConflict = false
+                    if planDirty {
+                        let count = store.planChangeCount
+                        switch try await putDoc("plan", updated: store.profile.planUpdatedAt ?? Date().timeIntervalSince1970,
+                                                deleted: store.plan == nil, data: store.plan, baseRev: planRev) {
+                        case .applied(let rev): store.markPlanPushed(rev: rev, changeCount: count); notes.append("training plan uploaded")
+                        case .conflict: planConflict = true
+                        }
+                    }
+                } else if !planDirty {
+                    planConflict = false
+                    if download {
+                        store.applyRemote(plan: r.deleted == true ? nil : r.data, rev: remoteRev, updated: r.updated)
+                        notes.append("training plan updated from the server")
+                    }
+                } else {
+                    planConflict = true                      // changed here AND on the server: keep both, let the user choose
+                    notes.append("plan conflict: choose which to keep in Settings")
                 }
-            } else if store.plan != nil && (userMadePlan || upload) {
-                _ = try await putDoc("plan", updated: localPlan, deleted: false, data: store.plan)
+            } else if store.plan != nil && (planDirty || upload) {
+                let count = store.planChangeCount
+                if case .applied(let rev) = try await putDoc("plan", updated: store.profile.planUpdatedAt ?? Date().timeIntervalSince1970,
+                                                             deleted: false, data: store.plan, baseRev: 0) {
+                    store.markPlanPushed(rev: rev, changeCount: count)
+                    notes.append("training plan uploaded")
+                }
             }
 
-            // Settings
-            let localSettings = store.profile.settingsUpdatedAt ?? 0
-            if let r = try await fetchDoc("settings", as: SettingsDoc.self) {
-                if r.updated > localSettings {
-                    if download, let s = r.data {
-                        store.applyRemote(maxHR: s.maxHR, voiceCues: s.voiceCues, autoUpload: s.autoUpload, updated: r.updated)
-                    }
-                } else if localSettings > r.updated {
-                    _ = try await putDoc("settings", updated: localSettings, deleted: false, data: currentSettings)
+            // ----- Settings (small: if both sides changed, the newest edit wins)
+            let remoteSettings = try await fetchDoc("settings", as: SettingsDoc.self)
+            let setDirty = store.settingsIsDirty
+            let setRev = store.profile.settingsRev ?? 0
+            if let r = remoteSettings {
+                let remoteRev = r.rev ?? 1
+                let takeRemote = { (s: SettingsDoc) in
+                    self.store.applyRemote(maxHR: s.maxHR, voiceCues: s.voiceCues, autoUpload: s.autoUpload, rev: remoteRev, updated: r.updated)
+                    notes.append("settings updated from the server")
                 }
-            } else if localSettings > 0 || upload {
-                let ts = localSettings > 0 ? localSettings : Date().timeIntervalSince1970
-                _ = try await putDoc("settings", updated: ts, deleted: false, data: currentSettings)
-                store.applyRemote(maxHR: store.profile.maxHR, voiceCues: store.profile.voiceCues,
-                                  autoUpload: store.profile.autoUpload, updated: ts)
+                if remoteRev == setRev {
+                    if setDirty {
+                        let count = store.settingsChangeCount
+                        if case .applied(let rev) = try await putDoc("settings", updated: store.profile.settingsUpdatedAt ?? Date().timeIntervalSince1970,
+                                                                     deleted: false, data: currentSettings, baseRev: setRev) {
+                            store.markSettingsPushed(rev: rev, changeCount: count)
+                        }
+                    }
+                } else if !setDirty {
+                    if download, let s = r.data { takeRemote(s) }
+                } else if (store.profile.settingsUpdatedAt ?? 0) > r.updated {
+                    let count = store.settingsChangeCount
+                    if case .applied(let rev) = try await putDoc("settings", updated: store.profile.settingsUpdatedAt ?? Date().timeIntervalSince1970,
+                                                                 deleted: false, data: currentSettings, baseRev: setRev, force: true) {
+                        store.markSettingsPushed(rev: rev, changeCount: count)
+                    }
+                } else if download, let s = r.data {
+                    takeRemote(s)
+                }
+            } else if setDirty || upload {
+                let count = store.settingsChangeCount
+                if case .applied(let rev) = try await putDoc("settings", updated: store.profile.settingsUpdatedAt ?? Date().timeIntervalSince1970,
+                                                             deleted: false, data: currentSettings, baseRev: 0) {
+                    store.markSettingsPushed(rev: rev, changeCount: count)
+                }
             }
         } catch {
             status = "Sync failed: \(error.localizedDescription)"
         }
+        return notes
     }
 
     private func syncFTP(upload: Bool, download: Bool, up: inout Int, down: inout Int) async throws {

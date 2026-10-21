@@ -66,6 +66,7 @@ extension AppTab {
 struct MainView: View {
     @State var tab: AppTab = .calendar
     @EnvironmentObject var updater: Updater
+    @EnvironmentObject var sync: SyncClient
 
     var body: some View {
         NavigationSplitView {
@@ -81,6 +82,14 @@ struct MainView: View {
                 Divider()
                 ForEach(AppTab.footerTabs) { navRow($0, big: false) }
                     .padding(.bottom, 2)
+                if sync.planConflict {
+                    Button { tab = .settings } label: {
+                        Label("Plan conflict: tap to resolve", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.bold()).foregroundColor(.orange)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 20).padding(.top, 8)
+                }
                 if let u = updater.available {
                     Button { tab = .settings } label: {
                         Label("Update available: v\(u.version)", systemImage: "arrow.down.circle.fill")

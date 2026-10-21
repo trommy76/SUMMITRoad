@@ -33,7 +33,8 @@ MFA_DISABLED = os.environ.get("SUMMITROAD_DISABLE_MFA", "0").strip().lower() in 
 SESSION_COOKIE = "sr_session"
 SESSION_LONG = 30 * 86400    # "keep me signed in"
 SESSION_SHORT = 12 * 3600
-DOC_NAMES = ("plan", "settings")
+DOC_NAMES = ("plan", "settings")   # small synced documents, versioned so one Mac cannot silently overwrite another
+DOC_HISTORY_KEEP = 40
 try:
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "qrcode.js"), "rb") as _f:
         QR_JS = _f.read()      # MIT-licensed QR generator (Kazuhiko Arase), served to the sign-in setup screen
@@ -54,6 +55,7 @@ CREATE TABLE IF NOT EXISTS rides (
   PRIMARY KEY (user, id));
 CREATE TABLE IF NOT EXISTS ftp (user TEXT, id TEXT, date TEXT, ftp REAL, method TEXT, PRIMARY KEY (user, id));
 CREATE TABLE IF NOT EXISTS docs (user TEXT, name TEXT, data TEXT, updated REAL, deleted INTEGER DEFAULT 0, PRIMARY KEY (user, name));
+CREATE TABLE IF NOT EXISTS doc_history (user TEXT, name TEXT, rev INTEGER, data TEXT, updated REAL, deleted INTEGER DEFAULT 0, device TEXT, ts REAL, PRIMARY KEY (user, name, rev));
 CREATE TABLE IF NOT EXISTS mfa (user TEXT PRIMARY KEY, secret TEXT, enabled INTEGER DEFAULT 0, last_step INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS recovery (user TEXT, hash TEXT, PRIMARY KEY (user, hash));
 CREATE TABLE IF NOT EXISTS app_passwords (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, name TEXT, salt TEXT, hash TEXT, created REAL, last_used REAL);
@@ -76,6 +78,12 @@ def init_db():
         cols = [r["name"] for r in c.execute("PRAGMA table_info(users)")]
         if "admin" not in cols:
             c.execute("ALTER TABLE users ADD COLUMN admin INTEGER DEFAULT 0")
+        dcols = [r["name"] for r in c.execute("PRAGMA table_info(docs)")]
+        if "rev" not in dcols:                      # documents saved before revisions existed become revision 1
+            c.execute("ALTER TABLE docs ADD COLUMN rev INTEGER DEFAULT 1")
+            c.execute("ALTER TABLE docs ADD COLUMN device TEXT")
+            c.execute("INSERT OR IGNORE INTO doc_history (user, name, rev, data, updated, deleted, device, ts) "
+                      "SELECT user, name, 1, data, updated, deleted, 'before revisions', updated FROM docs")
 
 
 def hash_pw(password, salt):
@@ -362,6 +370,42 @@ def _event_worker():
             sys.stderr.write("event log write failed: %s\n" % e)
 
 
+def doc_summary(name, data_text, deleted):
+    if deleted:
+        return "cleared"
+    try:
+        d = json.loads(data_text or "null") or {}
+        if name == "plan":
+            ws = d.get("workouts", [])
+            return "%s weeks, %d workouts, %d done" % (d.get("questionnaire", {}).get("weeks", "?"), len(ws),
+                                                         sum(1 for w in ws if w.get("completedDate")))
+        if name == "settings":
+            return "max HR %s, voice %s, auto-upload %s" % (d.get("maxHR"), "on" if d.get("voiceCues") else "off", "on" if d.get("autoUpload") else "off")
+    except Exception:
+        pass
+    return ""
+
+
+def save_doc_version(c, user, name, payload, updated, deleted, device, base_rev=None, force=False):
+    """Writes a new revision. Returns ("ok", rev), ("conflict", row) or ("stale", row) (old clients that send no revision)."""
+    row = c.execute("SELECT rev, updated, device FROM docs WHERE user=? AND name=?", (user, name)).fetchone()
+    if row and not force:
+        if base_rev is None:                                    # old client: newest timestamp wins, but history keeps the loser
+            if row["updated"] >= updated:
+                return "stale", row
+        elif base_rev != row["rev"]:
+            return "conflict", row
+    rev = (row["rev"] + 1) if row else 1
+    c.execute("INSERT INTO docs (user, name, data, updated, deleted, rev, device) VALUES (?,?,?,?,?,?,?) "
+              "ON CONFLICT(user, name) DO UPDATE SET data=excluded.data, updated=excluded.updated, deleted=excluded.deleted, "
+              "rev=excluded.rev, device=excluded.device",
+              (user, name, payload, updated, 1 if deleted else 0, rev, device))
+    c.execute("INSERT OR REPLACE INTO doc_history (user, name, rev, data, updated, deleted, device, ts) VALUES (?,?,?,?,?,?,?,?)",
+              (user, name, rev, payload, updated, 1 if deleted else 0, device, time.time()))
+    c.execute("DELETE FROM doc_history WHERE user=? AND name=? AND rev <= ?", (user, name, rev - DOC_HISTORY_KEEP))
+    return "ok", rev
+
+
 def _tok_hash(token):
     return hashlib.sha256(token.encode()).hexdigest()
 
@@ -642,11 +686,16 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200, bytes(row["fit"]), "application/octet-stream",
                                      {"Content-Disposition": 'attachment; filename="%s.fit"' % row["id"]})
             if len(parts) == 2 and parts[0] == "docs" and parts[1] in DOC_NAMES:
-                row = c.execute("SELECT data, updated, deleted FROM docs WHERE user=? AND name=?", (u, parts[1])).fetchone()
+                row = c.execute("SELECT data, updated, deleted, rev, device FROM docs WHERE user=? AND name=?", (u, parts[1])).fetchone()
                 if not row:
                     return self.send(404, {"error": "none"})
-                return self.send(200, {"updated": row["updated"], "deleted": bool(row["deleted"]),
+                return self.send(200, {"updated": row["updated"], "deleted": bool(row["deleted"]), "rev": row["rev"], "device": row["device"],
                                        "data": json.loads(row["data"]) if row["data"] else None})
+            if len(parts) == 3 and parts[0] == "docs" and parts[1] in DOC_NAMES and parts[2] == "history":
+                rows = c.execute("SELECT rev, data, updated, deleted, device, ts FROM doc_history WHERE user=? AND name=? ORDER BY rev DESC",
+                                 (u, parts[1])).fetchall()
+                return self.send(200, [{"rev": r["rev"], "updated": r["updated"], "ts": r["ts"], "device": r["device"], "deleted": bool(r["deleted"]),
+                                        "summary": doc_summary(parts[1], r["data"], r["deleted"])} for r in rows])
             if parts == ["log"]:
                 q = parse_qs(urlparse(self.path).query)
                 try:
@@ -697,17 +746,21 @@ class Handler(BaseHTTPRequestHandler):
                 updated = float(obj["updated"])
                 deleted = bool(obj.get("deleted"))
                 payload = json.dumps(obj.get("data"))
+                base_rev = int(obj["baseRev"]) if obj.get("baseRev") is not None else None
+                force = bool(obj.get("force"))
+                device = str(obj.get("device") or "unknown")[:60]
             except Exception as e:
                 return self.send(400, {"error": "bad document: %s" % e})
             with db() as c:
-                row = c.execute("SELECT updated FROM docs WHERE user=? AND name=?", (u, parts[2])).fetchone()
-                if row and row["updated"] >= updated:        # the stored copy is newer (or identical): keep it
-                    return self.send(200, {"applied": False, "updated": row["updated"]})
-                c.execute("INSERT INTO docs (user, name, data, updated, deleted) VALUES (?,?,?,?,?) "
-                          "ON CONFLICT(user, name) DO UPDATE SET data=excluded.data, updated=excluded.updated, deleted=excluded.deleted",
-                          (u, parts[2], payload, updated, 1 if deleted else 0))
-            self.ev(u, "plan_cleared" if (parts[2] == "plan" and deleted) else parts[2] + "_updated")
-            return self.send(200, {"applied": True, "updated": updated})
+                result, info = save_doc_version(c, u, parts[2], payload, updated, deleted, device, base_rev, force)
+            if result == "conflict":
+                log_event(u, self.client_ip(), self.client_kind(), parts[2] + "_conflict",
+                          "%s tried to change revision %s, but the server is on %s (from %s)" % (device, base_rev, info["rev"], info["device"] or "?"))
+                return self.send(409, {"conflict": True, "rev": info["rev"], "updated": info["updated"], "device": info["device"]})
+            if result == "stale":
+                return self.send(200, {"applied": False, "rev": info["rev"], "updated": info["updated"]})
+            self.ev(u, "plan_cleared" if (parts[2] == "plan" and deleted) else parts[2] + "_updated", "rev %d from %s" % (info, device))
+            return self.send(200, {"applied": True, "rev": info, "updated": updated})
         if len(parts) < 3 or parts[0] != "api" or not UUID_RE.match(parts[2]):
             return self.send(404, {"error": "not found"})
         rid = parts[2].upper()
@@ -778,6 +831,22 @@ class Handler(BaseHTTPRequestHandler):
             end_user_sessions(u)                      # everyone signed in as this user has to sign in again
             self.ev(u, "password_changed")
             return self.send(200, {"ok": True, "signedOut": True}, extra={"Set-Cookie": self.cookie_header("", 0)})
+        if len(parts) == 4 and parts[:2] == ["api", "docs"] and parts[2] in DOC_NAMES and parts[3] == "restore":
+            if not self.need_session():
+                return
+            try:
+                want = int(obj.get("rev"))
+            except Exception:
+                return self.send(400, {"error": "rev required"})
+            with db() as c:
+                old = c.execute("SELECT data, deleted FROM doc_history WHERE user=? AND name=? AND rev=?", (u, parts[2], want)).fetchone()
+                if not old:
+                    return self.send(404, {"error": "that version is no longer kept"})
+                result, rev = save_doc_version(c, u, parts[2], old["data"], time.time(), bool(old["deleted"]), "restored on the website", None, True)
+            if result != "ok":
+                return self.send(409, {"error": "could not restore"})
+            self.ev(u, parts[2] + "_restored", "revision %d restored as revision %d" % (want, rev))
+            return self.send(200, {"ok": True, "rev": rev})
         if parts[:2] == ["api", "mfa"] or parts[:2] == ["api", "apppasswords"]:
             if not self.need_session():
                 return
@@ -899,6 +968,7 @@ class Handler(BaseHTTPRequestHandler):
                 c.execute("DELETE FROM rides WHERE user=?", (name,))
                 c.execute("DELETE FROM ftp WHERE user=?", (name,))
                 c.execute("DELETE FROM docs WHERE user=?", (name,))
+                c.execute("DELETE FROM doc_history WHERE user=?", (name,))
                 c.execute("DELETE FROM sessions WHERE user=?", (name,))
                 c.execute("DELETE FROM mfa WHERE user=?", (name,))
                 c.execute("DELETE FROM recovery WHERE user=?", (name,))
@@ -958,7 +1028,10 @@ nav{display:flex;gap:4px;margin-left:12px}nav a{color:var(--mut);text-decoration
 <th>Date</th><th>Workout</th><th>Time</th><th>Avg W</th><th>NP</th><th>TSS</th><th>HR</th><th>Score</th></tr></thead><tbody id="rows"></tbody></table></div></div>
 </div>
 <div id="pagePlan" style="display:none"><h1 style="font-size:22px;margin:0 0 16px">Training Plan</h1>
-<div class="tiles" id="planTiles"></div><div id="planWeeks"></div></div>
+<div class="tiles" id="planTiles"></div><div id="planWeeks"></div>
+<div class="card" id="planHistCard" style="margin-top:20px;display:none"><h2>Version history</h2>
+<div class="muted" style="margin-bottom:10px">Each time a Mac saves the plan, the server keeps that version (the latest 40). If a plan was overwritten by mistake, restore an earlier one: your Macs pick it up the next time they sync.</div>
+<div class="scroll"><table><thead><tr><th>Saved</th><th>From</th><th>Version</th><th>Contents</th><th></th></tr></thead><tbody id="planHist"></tbody></table></div><div id="planHistMsg" class="msg"></div></div></div>
 <div id="pageSettings" style="display:none"><h1 style="font-size:22px;margin:0 0 16px">Settings</h1>
 <div class="card"><h2>Change password</h2>
 <form class="row" onsubmit="changePw();return false"><input type="text" autocomplete="username" style="display:none" tabindex="-1" aria-hidden="true"><input type="password" id="pwold" autocomplete="current-password" placeholder="Current password" required><input type="password" id="pwnew" autocomplete="new-password" placeholder="New password (min 10)" required><input type="password" id="pwnew2" autocomplete="new-password" placeholder="Repeat new password" required><button type="submit">Change password</button></form>
@@ -1069,11 +1142,20 @@ async function delUser(name){
   try{await call('DELETE','/api/users/'+encodeURIComponent(name));say('umsg','Deleted '+name+'.',true);loadUsers()}
   catch(e){say('umsg',e.message)}}
 let me='';
-const EV={login:'Signed in',login_failed:'Failed sign-in',throttled:'Blocked (too many failures)',sync:'App synced',dashboard_view:'Viewed dashboard',ride_added:'Ride uploaded',ride_updated:'Ride updated',ride_deleted:'Ride deleted',logout:'Signed out',mfa_enabled:'Two-factor turned on',mfa_disabled:'Two-factor turned off',mfa_reset:'Two-factor reset by admin',mfa_failed:'Failed two-factor code',recovery_code_used:'Recovery code used',recovery_codes_regenerated:'New recovery codes made',app_password_created:'App password created',app_password_revoked:'App password revoked',plan_updated:'Training plan synced',plan_cleared:'Training plan cleared',settings_updated:'Settings synced',ftp_added:'FTP result added',password_changed:'Password changed',password_change_failed:'Password change failed',password_reset:'Password reset',user_added:'User added',user_deleted:'User deleted'};
+const EV={login:'Signed in',login_failed:'Failed sign-in',throttled:'Blocked (too many failures)',sync:'App synced',dashboard_view:'Viewed dashboard',ride_added:'Ride uploaded',ride_updated:'Ride updated',ride_deleted:'Ride deleted',logout:'Signed out',plan_conflict:'Plan conflict (blocked an overwrite)',settings_conflict:'Settings conflict (blocked an overwrite)',plan_restored:'Plan version restored',settings_restored:'Settings version restored',mfa_enabled:'Two-factor turned on',mfa_disabled:'Two-factor turned off',mfa_reset:'Two-factor reset by admin',mfa_failed:'Failed two-factor code',recovery_code_used:'Recovery code used',recovery_codes_regenerated:'New recovery codes made',app_password_created:'App password created',app_password_revoked:'App password revoked',plan_updated:'Training plan synced',plan_cleared:'Training plan cleared',settings_updated:'Settings synced',ftp_added:'FTP result added',password_changed:'Password changed',password_change_failed:'Password change failed',password_reset:'Password reset',user_added:'User added',user_deleted:'User deleted'};
 const KIND={endurance:'Endurance',tempo:'Tempo',sweetSpot:'Sweet Spot',threshold:'Threshold',overUnder:'Over-Unders',vo2:'VO2 Max',vo2OnOff:'VO2 Max On-Offs',ftpRamp:'FTP Ramp Test',ftp20:'FTP 20-Minute Test',adhoc:'Workout'};
 const GOAL={raiseFTP:'Raise my FTP',timeTrial:'Time trial / sustained power',roadRace:'Road race / criterium',century:'Century / long event',general:'General fitness'};
 const PHASE={base:'Base',build:'Build',specialty:'Specialty'};
+async function loadPlanHistory(){
+  const h=await api('/api/docs/plan/history');
+  $('planHistCard').style.display=h.length?'block':'none';
+  $('planHist').innerHTML=h.map((x,i)=>'<tr style="cursor:default"><td>'+new Date(x.ts*1000).toLocaleString()+'</td><td>'+esc(x.device||'?')+'</td><td>#'+x.rev+(i===0?' <span class="muted">(current)</span>':'')+'</td><td class="muted">'+esc(x.summary)+'</td><td>'+(i===0?'':'<button data-r="'+x.rev+'" onclick="restorePlan(this.dataset.r)">Restore</button>')+'</td></tr>').join('')}
+async function restorePlan(rev){
+  if(!confirm('Restore version #'+rev+' as the current plan? It becomes a new version, and your Macs will pick it up when they sync. The version it replaces stays in the history.'))return;
+  try{await call('POST','/api/docs/plan/restore',{rev:+rev});say('planHistMsg','Restored. Your Macs will pick it up at their next sync (within a few minutes, or on Sync Now).',true);loadPlan()}
+  catch(e){say('planHistMsg',e.message)}}
 async function loadPlan(){
+  loadPlanHistory().catch(()=>{});
   let doc;try{doc=await api('/api/docs/plan')}catch(e){doc=null}
   if(!doc||doc.deleted||!doc.data){$('planTiles').innerHTML='';$('planWeeks').innerHTML='<div class="card muted">No training plan has been synced yet. Build one in the SummitRoad app and it will appear here.</div>';return}
   const p=doc.data,ws=p.workouts||[],today=new Date();today.setHours(0,0,0,0);
@@ -1091,7 +1173,7 @@ async function loadPlan(){
        const name=(KIND[w.kind]||w.kind)+(['ftpRamp','ftp20'].includes(w.kind)?'':' · level '+w.level)+(w.kind==='endurance'&&w.minutes?' · '+w.minutes+' min':'')+(w.isLong?' (long)':'');
        const status=isDone?'<span class="score">✓ done'+(w.completedScore!=null?' · score '+Math.round(w.completedScore):'')+'</span>':isMissed?'<span class="err">missed</span>':'<span class="muted">upcoming</span>';
        return '<tr style="cursor:default"><td>'+fmtD(w.date)+'</td><td>'+esc(name)+'</td><td>'+status+'</td></tr>'}).join('')+'</tbody></table></div>'}).join('')
-    +'<div class="muted" style="font-size:12px">Last updated '+new Date(doc.updated*1000).toLocaleString()+'. Read-only: edit the plan in the SummitRoad app.</div>'}
+    +'<div class="muted" style="font-size:12px">Version #'+doc.rev+', saved '+new Date(doc.updated*1000).toLocaleString()+(doc.device?' from '+esc(doc.device):'')+'. Read-only: edit the plan in the SummitRoad app.</div>'}
 async function loadLog(){
   const sel=$('logUser');const who=sel.style.display==='none'?'':sel.value;
   const rows=await api('/api/log?limit=200'+(who?'&user='+encodeURIComponent(who):''));

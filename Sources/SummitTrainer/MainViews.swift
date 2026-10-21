@@ -814,6 +814,21 @@ struct SettingsView: View {
                         }
                         if !sync.status.isEmpty { Text(sync.status).font(.caption).foregroundColor(.gray) }
                         if sync.configured, let v = sync.serverVersion { Text("Server version: v\(v)").font(.caption).foregroundColor(.gray) }
+                        if sync.planConflict {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Your training plan was changed on this Mac and on another Mac. Nothing has been overwritten. Choose which one to keep:")
+                                    .foregroundColor(.orange)
+                                HStack {
+                                    Button("Keep the server's plan") { Task { await sync.keepServerPlan() } }
+                                    Button("Use this Mac's plan") { Task { await sync.useThisMacsPlan() } }
+                                }
+                                Text("The version you don't pick is kept: on this Mac as the previous plan, or on the server in the website's version history.")
+                                    .font(.caption).foregroundColor(.gray)
+                            }
+                        }
+                        if store.hasPreviousPlan {
+                            Button("Restore the plan this Mac replaced") { store.restorePreviousPlan() }
+                        }
                         if let t = sync.lastSync { Text("Last sync: \(t.formatted(date: .abbreviated, time: .shortened))").font(.caption).foregroundColor(.gray) }
                     }
                 }

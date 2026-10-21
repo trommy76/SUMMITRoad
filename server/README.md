@@ -93,6 +93,26 @@ docker exec -it summitroad python server.py users                   # list users
 The password in `docker-compose.yml` is only used to create the admin the first time. Changing it later does not
 change the stored password; use the dashboard or the command above.
 
+## Versions, conflicts and history (the plan and settings)
+
+Every time a Mac saves the plan (or settings), the server stores it as a new numbered **version**, with the time and the
+name of the Mac. A Mac says which version its change was based on, and the server **refuses** a change based on an older
+version instead of overwriting the newer one. On the Mac:
+
+- server changed, this Mac didn't: it takes the server's version;
+- this Mac changed, server didn't: it sends its change;
+- **both changed**: nothing is overwritten. Settings > Home Server asks which plan to keep ("Keep the server's plan" or
+  "Use this Mac's plan"); the one you don't pick is kept (on the Mac as "the plan this Mac replaced", or on the server in
+  the history). For settings the newest edit simply wins.
+
+Macs also check the server every 5 minutes and whenever the app comes to the front (not during a ride).
+
+The website's **Training Plan** page lists the last 40 versions with a **Restore** button, so an overwritten plan can
+always be brought back. Restoring creates a new version, and your Macs pick it up on their next sync.
+
+Older app versions (before 1.0.26) don't send version numbers; the server still accepts their changes (newest timestamp
+wins) but keeps whatever they replace in the history. Update all your Macs to 1.0.26 or newer.
+
 ## Training plan page
 
 The dashboard has a read-only **Training Plan** page showing the plan synced from the app: goal, progress, missed and
