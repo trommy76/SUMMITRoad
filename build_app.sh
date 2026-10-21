@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds Summit Trainer.app (needs Xcode or Xcode command-line tools, macOS 13+)
+# Builds SummitRoad.app (needs Xcode or Xcode command-line tools, macOS 13+)
 set -e
 cd "$(dirname "$0")"
 pkill -x SummitTrainer || true

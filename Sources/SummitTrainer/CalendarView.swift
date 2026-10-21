@@ -174,7 +174,7 @@ struct CalendarView: View {
                     HStack {
                         VStack(alignment: .leading) {
                             Text(hoursText(w.totalSeconds)).font(.system(size: 11)).monospacedDigit()
-                            Text("DURATION").font(.system(size: 8)).foregroundColor(.gray)
+                            Text("DURATION").font(.system(size: 8)).foregroundColor(.gray).lineLimit(1).minimumScaleFactor(0.6)
                         }
                         VStack(alignment: .leading) {
                             Text("\(Int(w.estimatedTSS.rounded()))").font(.system(size: 11)).monospacedDigit()
@@ -200,7 +200,7 @@ struct CalendarView: View {
                 HStack {
                     VStack(alignment: .leading) {
                         Text(hoursText(r.durationSeconds)).font(.system(size: 11)).monospacedDigit()
-                        Text("DURATION").font(.system(size: 8)).foregroundColor(.gray)
+                        Text("DURATION").font(.system(size: 8)).foregroundColor(.gray).lineLimit(1).minimumScaleFactor(0.6)
                     }
                     VStack(alignment: .leading) {
                         Text("\(Int(r.tss.rounded()))").font(.system(size: 11)).monospacedDigit()

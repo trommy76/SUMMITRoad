@@ -123,7 +123,7 @@ struct RideView: View {
             Color(white: 0.13).ignoresSafeArea()
             VStack(spacing: 0) {
                 VStack(spacing: 2) {
-                    Text("SUMMIT TRAINER").font(.system(size: 17, weight: .black)).tracking(2)
+                    Text("SUMMITROAD").font(.system(size: 17, weight: .black)).tracking(2)
                     Text(s.workout.name.uppercased()).font(.system(size: 12, weight: .bold)).foregroundColor(.gray)
                 }
                 .padding(.top, 10)

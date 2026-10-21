@@ -1,20 +1,68 @@
-# Summit Trainer (macOS)
+# SummitRoad (macOS)
 
 A SwiftUI indoor-cycling trainer app: smart-trainer ERG control, heart-rate monitors, FTP tests, an adaptive training plan, live coaching, scoring and Strava upload.
+
+## Screenshots
+
+All screenshots use demo data.
+
+### The Mac app
+
+| | |
+|---|---|
+| **Calendar**: planned workouts with a profile preview, completed rides with their score, and weekly hours/TSS | **Today**: your FTP and the next workout |
+| ![Calendar](docs/screenshots/app-calendar.png) | ![Today](docs/screenshots/app-today.png) |
+| **Training Plan**: Base, Build and Specialty weeks that adapt to how you ride | **Workouts**: ad-hoc workouts scaled to your FTP, with drills and an intensity override |
+| ![Training Plan](docs/screenshots/app-plan.png) | ![Workouts](docs/screenshots/app-workouts.png) |
+
+**The ride screen**: power, interval time and heart rate on top; target, workout time and cadence below; interval stats and the workout profile with your live trace.
+
+![Ride screen](docs/screenshots/app-ride.png)
+
+**Ride report**: training score, coach feedback and a chart you can hover for the values at each point; send the .FIT file to Strava or Garmin.
+
+![Ride report](docs/screenshots/app-ride-report.png)
+
+**Settings**: FTP, Strava, the optional home server, updates and data.
+
+![Settings](docs/screenshots/app-settings.png)
+
+### The home server website (optional, see [server/README.md](server/README.md))
+
+A small Docker container keeps your rides, FTP history, plan and settings on your own network, syncs them between your Macs and shows them in a browser.
+
+| | |
+|---|---|
+| **Sign-in**, with optional two-factor | **Dashboard**: totals, FTP history, weekly TSS and every ride |
+| ![Sign-in](docs/screenshots/web-login.png) | ![Dashboard](docs/screenshots/web-dashboard.png) |
+
+**Ride detail**: hover the chart for power, target, heart rate, cadence and speed.
+
+![Ride detail](docs/screenshots/web-ride-detail.png)
+
+**Training plan** (read-only, from your Mac) with a version history you can restore from:
+
+![Training plan](docs/screenshots/web-plan.png)
+
+![Plan version history](docs/screenshots/web-plan-history.png)
+
+**Settings**: password, two-factor, app passwords for the Mac app, users (admin) and the activity log.
+
+![Settings](docs/screenshots/web-settings.png)
+
+![Activity log](docs/screenshots/web-activity-log.png)
 
 ## Build & run
 
 Requirements: macOS 13+, Xcode (or Xcode command-line tools).
 
 ```bash
-cd SummitTrainer
+cd SummitTrainer      # the project folder
 chmod +x build_app.sh
-./build_app.sh        # builds build/SummitTrainer.app and opens it
+./build_app.sh        # builds build/SummitRoad.app (and SummitRoad.zip) and opens it
 ```
 
 Or open `Package.swift` in Xcode and press Run. If running from Xcode, Bluetooth permission is attached to Xcode's process; use `build_app.sh` for the packaged app (its Info.plist has the Bluetooth usage string).
-
-This code was written without access to a Swift compiler. If Xcode reports a compile error, paste it back and it's a quick fix.
 
 ## First ride
 
