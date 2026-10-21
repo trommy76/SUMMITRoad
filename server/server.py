@@ -647,23 +647,23 @@ async function show(id){
   const r=await api('/api/rides/'+id),s=r.samples||[];
   $('detail').style.display='block';$('dtitle').textContent=r.workoutName+' · '+fmtD(r.date);
   $('dmeta').textContent=fmtT(r.durationSeconds)+' · avg '+Math.round(r.avgPower)+' W · NP '+Math.round(r.np)+' W · TSS '+Math.round(r.tss)+' · IF '+(r.intensityFactor||0).toFixed(2)+(r.avgHR?' · HR '+r.avgHR+' avg / '+r.maxHR+' max':'')+(r.avgCadence?' · '+r.avgCadence+' rpm':'');
-  if(s.length>1){const W=1000,H=260,P=30,n=s.length-1,mp=Math.max(100,...s.map(x=>Math.max(x.power,x.target||0)))*1.1,mh=Math.max(...s.map(x=>x.hr||0),1);
+  if(s.length>1){const W=1000,H=260,P=30,n=s.length-1,mp=Math.max(100,...s.map(x=>Math.max(x.power,x.target||0)))*1.1,mh=Math.max(...s.map(x=>x.hr||0),1),mc=Math.max(...s.map(x=>x.cad||0),1);
     const sm=s.map((x,i)=>{let a=0,c=0;for(let j=Math.max(0,i-4);j<=i;j++){a+=s[j].power;c++}return a/c});
-    const tg=s.map((x,i)=>[i/n,(x.target||0)/mp]),pw=sm.map((v,i)=>[i/n,v/mp]),hr=s.map((x,i)=>[i/n,(x.hr||0)/(mh*1.1)]);
-    $('dchart').innerHTML='<div id="cwrap" style="position:relative"><svg id="csvg" viewBox="0 0 '+W+' '+H+'">'+line(tg,W,H,'#555566',P)+line(pw,W,H,'#9e52f2',P)+(mh>1?line(hr,W,H,'#e5484d',P):'')
+    const tg=s.map((x,i)=>[i/n,(x.target||0)/mp]),pw=sm.map((v,i)=>[i/n,v/mp]),hr=s.map((x,i)=>[i/n,(x.hr||0)/(mh*1.1)]),cd=s.map((x,i)=>[i/n,(x.cad||0)/(mc*1.1)]);
+    $('dchart').innerHTML='<div id="cwrap" style="position:relative"><svg id="csvg" viewBox="0 0 '+W+' '+H+'">'+line(tg,W,H,'#555566',P)+line(pw,W,H,'#9e52f2',P)+(mh>1?line(hr,W,H,'#e5484d',P):'')+(mc>1?line(cd,W,H,'#4cc38a',P):'')
       +'<text x="4" y="14" fill="#8b8b96" font-size="11">'+Math.round(mp)+' W</text>'
       +'<line id="hline" x1="0" x2="0" y1="'+P+'" y2="'+(H-P)+'" stroke="#8b8b96" stroke-dasharray="3 3" style="display:none"/>'
-      +'<circle id="hpw" r="4.5" fill="#9e52f2" style="display:none"/><circle id="htg" r="3.5" fill="#8b8b99" style="display:none"/><circle id="hhr" r="4" fill="#e5484d" style="display:none"/>'
-      +'</svg><div id="tip" class="tip"></div></div><div class="muted">Power (purple), target (grey), heart rate (red). Hover the chart for the values at each point.</div>';
+      +'<circle id="hpw" r="4.5" fill="#9e52f2" style="display:none"/><circle id="htg" r="3.5" fill="#8b8b99" style="display:none"/><circle id="hhr" r="4" fill="#e5484d" style="display:none"/><circle id="hcd" r="4" fill="#4cc38a" style="display:none"/>'
+      +'</svg><div id="tip" class="tip"></div></div><div class="muted">Power (purple), target (grey), heart rate (red), cadence (green); each of heart rate and cadence is scaled to its own maximum. Hover the chart for the values at each point.</div>';
     const svg=$('csvg'),tip=$('tip'),X=i=>P+i/n*(W-2*P),Y=(v,m)=>H-P-v/m*(H-2*P);
     const clock=t=>{t=Math.round(t);const h=Math.floor(t/3600),m=Math.floor(t%3600/60),sec=t%60;return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(sec).padStart(2,'0')};
-    const hide=()=>{tip.style.display='none';['hline','hpw','htg','hhr'].forEach(i=>$(i).style.display='none')};
+    const hide=()=>{tip.style.display='none';['hline','hpw','htg','hhr','hcd'].forEach(i=>$(i).style.display='none')};
     const move=ev=>{
       const rc=svg.getBoundingClientRect(),fx=(ev.clientX-rc.left)/rc.width*W;
       const i=Math.max(0,Math.min(n,Math.round((fx-P)/(W-2*P)*n))),d=s[i],x=X(i);
       $('hline').setAttribute('x1',x);$('hline').setAttribute('x2',x);$('hline').style.display='block';
       const dot=(id,v,m)=>{const e=$(id);if(v==null||!(v>0)){e.style.display='none';return}e.setAttribute('cx',x);e.setAttribute('cy',Y(v,m));e.style.display='block'};
-      dot('hpw',sm[i],mp);dot('htg',d.target,mp);dot('hhr',d.hr,mh*1.1);
+      dot('hpw',sm[i],mp);dot('htg',d.target,mp);dot('hhr',d.hr,mh*1.1);dot('hcd',d.cad,mc*1.1);
       const row=(label,val,color)=>val==null||val===''?'':'<div><span style="color:'+color+'">&#9679;</span> '+label+' <b>'+val+'</b></div>';
       tip.innerHTML='<div class="muted">'+clock(d.t!=null?d.t:i)+' into the ride'+(d.kind?' · '+esc(d.kind):'')+'</div>'
         +row('Power',d.power+' W','#9e52f2')+'<div class="muted" style="margin-left:14px">5 s avg '+Math.round(sm[i])+' W</div>'
