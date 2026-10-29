@@ -134,7 +134,7 @@ struct RideView: View {
                         powerBar
                     }
                     if s.route != nil {
-                        cell("DISTANCE LEFT", String(format: "%.1f", s.routeRemaining / 1000), subtitle: "km · \(Int(s.speedKmh.rounded())) km/h")
+                        cell("SPEED", String(format: "%.1f", s.speedKmh), subtitle: String(format: "km/h · avg %.1f", s.avgSpeedKmh))
                     } else {
                         cell("INTERVAL TIME", formatTime(s.intervalRemaining), subtitle: s.intervalLabel)
                     }
@@ -148,7 +148,11 @@ struct RideView: View {
                     } else {
                         cell("TARGET", targetText)
                     }
-                    cell("WORKOUT TIME", hms(s.elapsed))
+                    if let rr = s.route {
+                        cell("DISTANCE LEFT", String(format: "%.1f", s.routeRemaining / 1000), subtitle: String(format: "km · of %.1f km", rr.length / 1000))
+                    } else {
+                        cell("WORKOUT TIME", hms(s.elapsed))
+                    }
                     cell("CADENCE", s.cadence.map { "\($0)" } ?? "--")
                 }
                 .frame(maxHeight: .infinity)
@@ -170,9 +174,16 @@ struct RideView: View {
 
                 if showStats {
                     HStack(spacing: 0) {
-                        stat("\(s.intPower)", "INT POW")
-                        stat(s.intHR.map { "\($0)" } ?? "---", "INT HR")
-                        stat(s.intCadence.map { "\($0)" } ?? "--", "INT CAD")
+                        if s.route != nil {
+                            stat(hms(s.elapsed), "TIME")
+                            stat(String(format: "%.1f km", s.distanceM / 1000), "DISTANCE")
+                            stat(String(format: "%.1f", s.avgSpeedKmh), "AVG KM/H")
+                            stat("\(Int(s.routeClimbed.rounded())) m", "CLIMBED")
+                        } else {
+                            stat("\(s.intPower)", "INT POW")
+                            stat(s.intHR.map { "\($0)" } ?? "---", "INT HR")
+                            stat(s.intCadence.map { "\($0)" } ?? "--", "INT CAD")
+                        }
                         stat("\(Int(s.tss.rounded()))", "TSS")
                         stat("\(Int(s.kj.rounded()))", "TOTAL KJ")
                         stat("\(Int(s.np.rounded()))", "NP")

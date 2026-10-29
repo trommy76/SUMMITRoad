@@ -103,6 +103,8 @@ final class RideSession: ObservableObject {
     var intervalRemaining: Int { segment.seconds - segElapsed }
     var workoutRemaining: Int { totalSeconds - elapsed }
     var routeRemaining: Double { max(0, (route?.length ?? 0) - distanceM) }
+    var avgSpeedKmh: Double { elapsed > 0 ? distanceM / Double(elapsed) * 3.6 : 0 }
+    var routeClimbed: Double { route.map { $0.route.ascent(from: $0.startM, to: $0.startM + distanceM) } ?? 0 }
     var endTime: Date {
         if route != nil {                                          // remaining distance at the average speed so far
             let avg = elapsed >= 30 ? distanceM / Double(elapsed) : 8.0

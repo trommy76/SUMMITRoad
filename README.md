@@ -100,7 +100,7 @@ Ride any GPX route in **simulation mode**: instead of holding a power target (ER
 1. **Workouts > Routes > Import GPX…** and give the route a name. The GPX needs elevation data (recorded rides exported from Strava or Garmin have it). The file is copied into the app's data folder on your Mac (`~/Library/Application Support/SummitTrainer/routes`) and is never uploaded or synced.
 2. Open the route, then use the **Start/Finish sliders** to choose a section, or **Fit to 60 / 75 / 90 min** to pick a finish point for the time you have. The estimate comes from your power at the chosen effort (Easy 55%, Endurance 65%, Tempo 80%, Hard 95% of FTP), the gradient and your weight.
 3. Set **Rider + bike weight** (Settings > Athlete, default 80 kg). It is used to work out your speed and progress along the route from your power.
-4. **Start Ride.** The ride screen shows the colour-coded elevation profile (blue flat, then green, yellow, orange and red as it gets steeper) with a bike at your position, the part you've ridden dimmed, and distance left, grade, elevation and speed alongside your power, heart rate and cadence. The ride ends at the finish.
+4. **Start Ride.** The ride screen shows the colour-coded elevation profile (blue flat, then green, yellow, orange and red as it gets steeper) with a bike at your position and the part you've ridden dimmed. The six big numbers are power, **speed** (with your average), heart rate, grade (with elevation), distance left and cadence; a strip below shows elapsed time, distance ridden, average speed and climbing so far. The ride ends at the finish.
 
 Gradients are smoothed over about 160 m and limited to -10% to +15%, so the resistance changes gradually. Route rides have no training score.
 
