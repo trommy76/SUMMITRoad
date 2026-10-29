@@ -1,7 +1,7 @@
 import Foundation
 import AVFoundation
 
-enum RideState { case ready, running, paused, finished }
+enum RideState { case ready, waiting, running, paused, finished }
 
 enum CoachMessages {
     static let general = [
@@ -61,10 +61,17 @@ final class RideSession: ObservableObject {
     @Published var kj = 0.0
     @Published var avgPower = 0.0
     @Published var testEnded = false
+    @Published var waitingPower = 0          // live readings shown while waiting for the first pedal strokes
+    @Published var waitingCadence: Int?
+    var waitForPedal = true                  // false: Start Workout begins at once
+    /// Where the "are they pedalling?" check gets its readings (replaceable so it can be tested without a trainer).
+    lazy var readings: () -> LiveReading = { [weak self] in self?.ble.snapshot() ?? LiveReading() }
 
     var onFinish: ((RideSummary) -> Void)?
 
     private var timer: Timer?
+    private var waitTimer: Timer?
+    private var pedalPolls = 0
     private var lastSentTarget = -1
     private var lowCadenceSeconds = 0
     private var highHRSeconds = 0
@@ -120,8 +127,38 @@ final class RideSession: ObservableObject {
 
     // MARK: Control
 
-    func begin() {
+    /// "Start Workout": wait until the rider is actually pedalling, then begin. Skips the wait for the demo trainer or when
+    /// the setting is off.
+    func armStart() {
         guard state == .ready else { return }
+        if ble.demoMode || !waitForPedal { begin(); return }
+        state = .waiting
+        pedalPolls = 0
+        waitingPower = 0
+        waitingCadence = nil
+        message = "Start pedalling to begin."
+        say("Start pedalling whenever you're ready. The workout begins when you do.")
+        waitTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.pollForPedalling() }
+        }
+    }
+
+    /// Pedalling = real power (20 W+) or a cadence of 30 rpm+, seen for three checks in a row (1.5 s), so one bump
+    /// of the pedals doesn't start it.
+    private func pollForPedalling() {
+        guard state == .waiting else { return }
+        let r = readings()
+        waitingPower = r.power ?? 0
+        waitingCadence = r.cadence
+        let pedalling = (r.power ?? 0) >= 20 || (r.cadence ?? 0) >= 30
+        pedalPolls = pedalling ? pedalPolls + 1 : 0
+        if pedalPolls >= 3 { begin() }
+    }
+
+    func begin() {
+        guard state == .ready || state == .waiting else { return }
+        waitTimer?.invalidate()
+        waitTimer = nil
         state = .running
         startDate = Date()
         ble.startWorkout()
@@ -164,6 +201,8 @@ final class RideSession: ObservableObject {
     func end() {
         timer?.invalidate()
         timer = nil
+        waitTimer?.invalidate()
+        waitTimer = nil
         if state != .finished {
             state = .finished
             ble.setTargetPower(0)

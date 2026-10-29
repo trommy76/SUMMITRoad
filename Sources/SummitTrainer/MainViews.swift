@@ -750,6 +750,8 @@ struct SettingsView: View {
                         }
                         Stepper("Max heart rate: \(store.profile.maxHR) bpm", value: $store.profile.maxHR, in: 120...220)
                         Toggle("Voice coaching cues (spoken)", isOn: $store.profile.voiceCues)
+                        Toggle("Wait until I start pedalling before the workout begins",
+                               isOn: Binding(get: { store.profile.waitForPedal ?? true }, set: { store.profile.waitForPedal = $0 }))
                     }
                 }
 

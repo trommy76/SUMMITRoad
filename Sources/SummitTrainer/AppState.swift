@@ -194,6 +194,7 @@ final class AppState: ObservableObject {
                             ftp: workout.kind.isTest ? workout.ftp : (store.profile.ftp ?? workout.ftp),
                             maxHR: store.profile.maxHR, voice: store.profile.voiceCues)
         s.intensityScale = intensity
+        s.waitForPedal = store.profile.waitForPedal ?? true
         s.onFinish = { [weak self] summary in self?.finish(summary, workout: workout) }
         session = s
     }

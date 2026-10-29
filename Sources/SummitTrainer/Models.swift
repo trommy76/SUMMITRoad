@@ -253,6 +253,7 @@ struct Profile: Codable {
     var settingsRev: Int?
     var planDirty: Bool?              // true while this Mac has plan changes the server has not accepted yet
     var settingsDirty: Bool?
+    var waitForPedal: Bool?           // nil = on: Start Workout waits until you pedal
 }
 
 // MARK: - Metrics

@@ -188,6 +188,7 @@ struct RideView: View {
                     .allowsHitTesting(false)
             }
             if s.state == .ready { readyOverlay }
+            if s.state == .waiting { waitingOverlay }
         }
         .confirmationDialog("End this workout?", isPresented: $confirmEnd) {
             Button("End & Save Ride") { s.end() }
@@ -198,7 +199,7 @@ struct RideView: View {
 
     private var controls: some View {
         HStack(spacing: 14) {
-            if s.state != .ready {
+            if s.state == .running || s.state == .paused {
                 Button(s.state == .paused ? "Resume" : "Pause") { s.togglePause() }
                     .keyboardShortcut(.space, modifiers: [])
                 Button("Skip Interval") { s.skipInterval() }
@@ -209,10 +210,33 @@ struct RideView: View {
             Spacer()
             Toggle("Voice", isOn: $s.voice).toggleStyle(.checkbox)
             Toggle("Stats", isOn: $showStats).toggleStyle(.checkbox)
-            Button("End") { if s.state == .ready { app.discardSession() } else { confirmEnd = true } }
+            Button("End") { if s.state == .ready || s.state == .waiting { app.discardSession() } else { confirmEnd = true } }
         }
         .padding(10)
         .background(Color(white: 0.09))
+    }
+
+    private var waitingOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.95).ignoresSafeArea()
+            VStack(spacing: 18) {
+                Text(s.workout.name).font(.system(size: 28, weight: .heavy)).foregroundColor(.gray)
+                Text("Start pedalling to begin").font(.system(size: 44, weight: .heavy))
+                Text("The clock, the intervals and the trainer's resistance start as soon as you do.")
+                    .foregroundColor(.gray).multilineTextAlignment(.center).frame(maxWidth: 520)
+                HStack(spacing: 40) {
+                    VStack { Text("\(s.waitingPower)").font(.system(size: 56, weight: .bold)).monospacedDigit(); Text("WATTS").font(.caption).foregroundColor(.gray) }
+                    VStack { Text(s.waitingCadence.map { "\($0)" } ?? "–").font(.system(size: 56, weight: .bold)).monospacedDigit(); Text("RPM").font(.caption).foregroundColor(.gray) }
+                }
+                HStack(spacing: 16) {
+                    Button("Cancel") { app.discardSession() }
+                    Button("Start Now") { s.begin() }
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(.return, modifiers: [])
+                }
+            }
+            .padding(40)
+        }
     }
 
     private var readyOverlay: some View {
@@ -243,7 +267,7 @@ struct RideView: View {
                 }
                 HStack(spacing: 16) {
                     Button("Cancel") { app.discardSession() }
-                    Button(action: { s.begin() }) {
+                    Button(action: { s.armStart() }) {
                         Text("Start Workout").font(.title2.bold()).padding(.horizontal, 30).padding(.vertical, 6)
                     }
                     .buttonStyle(.borderedProminent)
