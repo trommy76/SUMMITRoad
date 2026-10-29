@@ -133,13 +133,21 @@ struct RideView: View {
                         cell("POWER", "\(s.power)")
                         powerBar
                     }
-                    cell("INTERVAL TIME", formatTime(s.intervalRemaining), subtitle: s.intervalLabel)
+                    if s.route != nil {
+                        cell("DISTANCE LEFT", String(format: "%.1f", s.routeRemaining / 1000), subtitle: "km · \(Int(s.speedKmh.rounded())) km/h")
+                    } else {
+                        cell("INTERVAL TIME", formatTime(s.intervalRemaining), subtitle: s.intervalLabel)
+                    }
                     cell("HEART RATE", s.hr.map { "\($0)" } ?? "---")
                 }
                 .frame(maxHeight: .infinity)
 
                 HStack(alignment: .top, spacing: 0) {
-                    cell("TARGET", targetText)
+                    if s.route != nil {
+                        cell("GRADE", String(format: "%.1f%%", s.routeGrade), subtitle: "\(Int(s.routeEle.rounded())) m elevation")
+                    } else {
+                        cell("TARGET", targetText)
+                    }
                     cell("WORKOUT TIME", hms(s.elapsed))
                     cell("CADENCE", s.cadence.map { "\($0)" } ?? "--")
                 }
@@ -174,8 +182,12 @@ struct RideView: View {
                     .background(Color(white: 0.16))
                 }
 
-                WorkoutChart(workout: s.workout, ftp: s.ftp, elapsed: s.elapsed, samples: s.samples)
-                    .frame(height: 190)
+                if let rr = s.route {
+                    RouteChart(route: rr.route, highlight: rr.startM...rr.endM, position: rr.startM + s.distanceM, legend: true).frame(height: 190)
+                } else {
+                    WorkoutChart(workout: s.workout, ftp: s.ftp, elapsed: s.elapsed, samples: s.samples)
+                        .frame(height: 190)
+                }
 
                 controls
             }
@@ -202,10 +214,12 @@ struct RideView: View {
             if s.state == .running || s.state == .paused {
                 Button(s.state == .paused ? "Resume" : "Pause") { s.togglePause() }
                     .keyboardShortcut(.space, modifiers: [])
-                Button("Skip Interval") { s.skipInterval() }
-                Button("−5%") { s.adjustIntensity(-0.05) }
-                Text("\(Int((s.intensityScale * 100).rounded()))%").monospacedDigit().frame(width: 50)
-                Button("+5%") { s.adjustIntensity(0.05) }
+                if s.route == nil {
+                    Button("Skip Interval") { s.skipInterval() }
+                    Button("−5%") { s.adjustIntensity(-0.05) }
+                    Text("\(Int((s.intensityScale * 100).rounded()))%").monospacedDigit().frame(width: 50)
+                    Button("+5%") { s.adjustIntensity(0.05) }
+                }
             }
             Spacer()
             Toggle("Voice", isOn: $s.voice).toggleStyle(.checkbox)
@@ -247,7 +261,10 @@ struct RideView: View {
                 Text(s.workout.note ?? s.workout.kind.blurb).foregroundColor(.gray).multilineTextAlignment(.center).frame(maxWidth: 520)
                 HStack(spacing: 28) {
                     VStack { Text(formatTime(s.totalSeconds)).font(.title.bold()); Text("DURATION").font(.caption).foregroundColor(.gray) }
-                    if !s.workout.kind.isTest {
+                    if let rr = s.route {
+                        VStack { Text(String(format: "%.1f km", rr.length / 1000)).font(.title.bold()); Text("DISTANCE").font(.caption).foregroundColor(.gray) }
+                        VStack { Text("\(Int(rr.route.ascent(from: rr.startM, to: rr.endM).rounded())) m").font(.title.bold()); Text("CLIMBING").font(.caption).foregroundColor(.gray) }
+                    } else if !s.workout.kind.isTest {
                         VStack { Text("\(Int(s.workout.estimatedTSS.rounded()))").font(.title.bold()); Text("EST. TSS").font(.caption).foregroundColor(.gray) }
                     }
                     VStack { Text("\(Int(s.ftp)) W").font(.title.bold()); Text(s.workout.kind.isTest ? "EST. FTP" : "FTP").font(.caption).foregroundColor(.gray) }

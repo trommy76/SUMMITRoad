@@ -23,6 +23,8 @@ enum FITEncoder {
         var data = Data()
         mutating func u8(_ v: UInt8) { data.append(v) }
         mutating func u16(_ v: UInt16) { data.append(contentsOf: [UInt8(v & 0xFF), UInt8(v >> 8)]) }
+        mutating func s16(_ v: Int16) { u16(UInt16(bitPattern: v)) }
+        mutating func s32(_ v: Int32) { u32(UInt32(bitPattern: v)) }
         mutating func u32(_ v: UInt32) {
             data.append(contentsOf: [UInt8(v & 0xFF), UInt8((v >> 8) & 0xFF),
                                      UInt8((v >> 16) & 0xFF), UInt8((v >> 24) & 0xFF)])
@@ -37,11 +39,17 @@ enum FITEncoder {
 
     // base types
     private static let tEnum: UInt8 = 0x00, tU8: UInt8 = 0x02, tU16: UInt8 = 0x84
-    private static let tU32: UInt8 = 0x86, tU32z: UInt8 = 0x8C
+    private static let tU32: UInt8 = 0x86, tU32z: UInt8 = 0x8C, tS16: UInt8 = 0x83, tS32: UInt8 = 0x85
 
     private static func ts(_ d: Date) -> UInt32 { UInt32(max(0, d.timeIntervalSince1970 - fitEpoch)) }
     private static func u8(_ v: Int?) -> UInt8 { v.map { UInt8(max(0, min(254, $0))) } ?? 0xFF }
     private static func u16(_ v: Double) -> UInt16 { UInt16(max(0, min(65534, v.rounded()))) }
+
+    /// Degrees to FIT semicircles (2^31 per 180 degrees); 0x7FFFFFFF means "no position".
+    private static func semicircles(_ degrees: Double?) -> Int32 {
+        guard let d = degrees else { return 0x7FFF_FFFF }
+        return Int32(max(-2147483647, min(2147483646, (d * 2147483648.0 / 180.0).rounded())))
+    }
 
     static func encode(_ r: RideSummary) -> Data {
         var w = Writer()
@@ -57,19 +65,30 @@ enum FITEncoder {
         let speeds = r.samples.compactMap { $0.speed }
         let hasSpeed = !speeds.isEmpty
         var distance = 0.0                                   // metres
-        w.definition(local: 1, global: 20, fields: [(253, 4, tU32), (5, 4, tU32), (6, 2, tU16), (3, 1, tU8), (4, 1, tU8), (7, 2, tU16)])
+        w.definition(local: 1, global: 20, fields: [(253, 4, tU32), (0, 4, tS32), (1, 4, tS32), (5, 4, tU32), (6, 2, tU16), (2, 2, tU16), (9, 2, tS16), (3, 1, tU8), (4, 1, tU8), (7, 2, tU16)])
         for s in r.samples {
             if let v = s.speed { distance += v / 3.6 }
             w.u8(1)
             w.u32(ts(start.addingTimeInterval(Double(s.t))))
+            w.s32(semicircles(s.lat))                                                                      // position, semicircles
+            w.s32(semicircles(s.lon))
             w.u32(hasSpeed ? UInt32(max(0, min(4_294_967_294, (distance * 100).rounded()))) : 0xFFFF_FFFF)   // distance, 0.01 m
             w.u16(s.speed.map { u16($0 / 3.6 * 1000) } ?? 0xFFFF)                                          // speed, 0.001 m/s
+            w.u16(s.alt.map { u16(($0 + 500) * 5) } ?? 0xFFFF)                                             // altitude: (m + 500) * 5
+            w.s16(s.grade.map { Int16(clamping: Int(($0 * 100).rounded())) } ?? 0x7FFF)                    // grade, 0.01 %
             w.u8(UInt8(s.hr.map { max(0, min(254, $0)) } ?? 0xFF))
             w.u8(UInt8(s.cad.map { max(0, min(254, $0)) } ?? 0xFF))
             w.u16(UInt16(max(0, min(65534, s.power))))
         }
 
         let elapsedMs = UInt32(r.durationSeconds * 1000)
+        let alts = r.samples.compactMap { $0.alt }
+        var ascent = 0.0, descent = 0.0
+        for k in alts.indices.dropFirst() { let dz = alts[k] - alts[k - 1]; if dz > 0 { ascent += dz } else { descent -= dz } }
+        let firstPos = r.samples.first(where: { $0.lat != nil && $0.lon != nil })
+        let isRoute = firstPos != nil                    // a simulated route ride is a "virtual activity" with a position track
+        let totalAscent: UInt16 = alts.isEmpty ? 0xFFFF : u16(ascent)
+        let totalDescent: UInt16 = alts.isEmpty ? 0xFFFF : u16(descent)
         let totalDistance: UInt32 = hasSpeed ? UInt32(max(0, min(4_294_967_294, (distance * 100).rounded()))) : 0xFFFF_FFFF
         let avgSpeed: UInt16 = hasSpeed ? u16(speeds.reduce(0, +) / Double(speeds.count) / 3.6 * 1000) : 0xFFFF
         let maxSpeed: UInt16 = hasSpeed ? u16((speeds.max() ?? 0) / 3.6 * 1000) : 0xFFFF
@@ -85,16 +104,17 @@ enum FITEncoder {
             (253, 4, tU32), (2, 4, tU32), (7, 4, tU32), (8, 4, tU32), (5, 1, tEnum), (6, 1, tEnum),
             (20, 2, tU16), (21, 2, tU16), (34, 2, tU16), (16, 1, tU8), (17, 1, tU8), (18, 1, tU8),
             (25, 2, tU16), (26, 2, tU16), (0, 1, tEnum), (1, 1, tEnum),
-            (9, 4, tU32), (14, 2, tU16), (15, 2, tU16)])
+            (9, 4, tU32), (14, 2, tU16), (15, 2, tU16), (22, 2, tU16), (23, 2, tU16), (3, 4, tS32), (4, 4, tS32)])
         w.u8(3); w.u32(ts(end)); w.u32(ts(start)); w.u32(elapsedMs); w.u32(elapsedMs)
-        w.u8(2); w.u8(6)                                  // cycling / indoor_cycling
+        w.u8(2); w.u8(isRoute ? 58 : 6)                   // cycling / virtual_activity (route rides) or indoor_cycling
         w.u16(u16(r.avgPower))
         w.u16(u16(Double(r.samples.map { $0.power }.max() ?? 0)))
         w.u16(u16(r.np))
         w.u8(UInt8(u8(r.avgHR))); w.u8(UInt8(u8(r.maxHR))); w.u8(UInt8(u8(r.avgCadence)))
         w.u16(0); w.u16(1)
         w.u8(8); w.u8(1)
-        w.u32(totalDistance); w.u16(avgSpeed); w.u16(maxSpeed)
+        w.u32(totalDistance); w.u16(avgSpeed); w.u16(maxSpeed); w.u16(totalAscent); w.u16(totalDescent)
+        w.s32(semicircles(firstPos?.lat)); w.s32(semicircles(firstPos?.lon))
 
         // activity
         w.definition(local: 4, global: 34, fields: [(253, 4, tU32), (0, 4, tU32), (1, 2, tU16), (2, 1, tEnum), (3, 1, tEnum), (4, 1, tEnum)])

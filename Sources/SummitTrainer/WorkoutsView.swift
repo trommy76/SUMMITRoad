@@ -11,6 +11,7 @@ struct WorkoutsView: View {
                 if let ftp = store.profile.ftp {
                     Text("Ride something outside your plan. Every workout is scaled to your FTP of \(Int(ftp)) W, and you can dial it up or down before you start.")
                         .foregroundColor(.gray)
+                    RoutesSection()
                     ForEach(AdhocWorkout.Category.allCases, id: \.self) { cat in
                         VStack(alignment: .leading, spacing: 10) {
                             Text(cat.rawValue).font(.title3.bold())

@@ -194,7 +194,7 @@ final class StravaClient: ObservableObject {
     }
 
     /// Uploads a FIT file. Returns the Strava activity id once processing completes.
-    func upload(fit: Data, name: String, description: String) async throws -> Int? {
+    func upload(fit: Data, name: String, description: String, virtual: Bool = false) async throws -> Int? {
         let token = try await accessToken()
         let boundary = "Boundary-\(UUID().uuidString)"
         var body = Data()
@@ -204,9 +204,9 @@ final class StravaClient: ObservableObject {
         field("data_type", "fit")
         field("name", name)
         field("description", description)
-        field("trainer", "1")
+        field("trainer", virtual ? "0" : "1")
         field("commute", "0")
-        field("sport_type", "Ride")
+        field("sport_type", virtual ? "VirtualRide" : "Ride")
         field("external_id", "summit-\(UUID().uuidString)")
         body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"ride.fit\"\r\nContent-Type: application/octet-stream\r\n\r\n".utf8))
         body.append(fit)

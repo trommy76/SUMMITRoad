@@ -190,6 +190,10 @@ struct Sample: Codable {
     var kind: SegmentKind
     var seg: Int
     var speed: Double?        // km/h as reported by the trainer (nil on rides recorded before this was captured)
+    var alt: Double?          // metres, for route rides
+    var grade: Double?        // percent, for route rides
+    var lat: Double?          // degrees, for route rides (the road you rode in the simulation)
+    var lon: Double?
 }
 
 struct ScoreBreakdown: Codable {
@@ -254,6 +258,7 @@ struct Profile: Codable {
     var planDirty: Bool?              // true while this Mac has plan changes the server has not accepted yet
     var settingsDirty: Bool?
     var waitForPedal: Bool?           // nil = on: Start Workout waits until you pedal
+    var riderWeightKg: Double?        // rider + bike, used for route rides (nil = 80)
 }
 
 // MARK: - Metrics

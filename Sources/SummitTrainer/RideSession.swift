@@ -64,6 +64,15 @@ final class RideSession: ObservableObject {
     @Published var waitingPower = 0          // live readings shown while waiting for the first pedal strokes
     @Published var waitingCadence: Int?
     var waitForPedal = true                  // false: Start Workout begins at once
+    /// Set for a simulated route ride: gradient is sent to the trainer and progress comes from power, gradient and weight.
+    var route: RouteRide?
+    @Published var distanceM = 0.0           // metres ridden along the chosen section
+    @Published var routeGrade = 0.0
+    @Published var routeEle = 0.0
+    @Published var speedKmh = 0.0
+    var lastGradeSent: Double?
+    private var lastGradeSentAt = -100
+    private var routeCues = Set<Int>()
     /// Where the "are they pedalling?" check gets its readings (replaceable so it can be tested without a trainer).
     lazy var readings: () -> LiveReading = { [weak self] in self?.ble.snapshot() ?? LiveReading() }
 
@@ -93,7 +102,14 @@ final class RideSession: ObservableObject {
     var totalSeconds: Int { workout.totalSeconds }
     var intervalRemaining: Int { segment.seconds - segElapsed }
     var workoutRemaining: Int { totalSeconds - elapsed }
-    var endTime: Date { Date().addingTimeInterval(Double(workoutRemaining)) }
+    var routeRemaining: Double { max(0, (route?.length ?? 0) - distanceM) }
+    var endTime: Date {
+        if route != nil {                                          // remaining distance at the average speed so far
+            let avg = elapsed >= 30 ? distanceM / Double(elapsed) : 8.0
+            return Date().addingTimeInterval(routeRemaining / max(3.0, avg))
+        }
+        return Date().addingTimeInterval(Double(workoutRemaining))
+    }
 
     var nextSegment: Segment? {
         segIndex + 1 < workout.segments.count ? workout.segments[segIndex + 1] : nil
@@ -215,8 +231,9 @@ final class RideSession: ObservableObject {
 
     private func tick() {
         guard state == .running else { return }
+        if route != nil { routeTick(); return }
         let seg = segment
-        let r = ble.snapshot()
+        let r = readings()
         power = r.power ?? 0
         hr = r.hr
         cadence = r.cadence
@@ -260,7 +277,58 @@ final class RideSession: ObservableObject {
         return avgP < Double(target) * 0.75 || lowCad
     }
 
+    /// One second of a route ride: work out the speed from the power just ridden, move along the road, and tell the
+    /// trainer the new gradient.
+    private func routeTick() {
+        guard let rr = route else { return }
+        let r = readings()
+        power = r.power ?? 0
+        hr = r.hr
+        cadence = r.cadence
+        let here = rr.route.sample(at: rr.startM + distanceM)
+        routeGrade = here.grade
+        routeEle = here.ele
+        let v = RoutePhysics.speed(power: Double(power), grade: here.grade, mass: rr.mass)       // m/s
+        speedKmh = v * 3.6
+        let where_ = rr.route.coordinate(at: rr.startM + distanceM)
+        samples.append(Sample(t: elapsed, power: power, hr: hr, cad: cadence, target: nil, kind: .endurance, seg: 0,
+                              speed: speedKmh, alt: here.ele, grade: here.grade, lat: where_?.lat, lon: where_?.lon))
+        updateMetrics()
+        elapsed += 1
+        segElapsed += 1
+        distanceM += v
+        sendRouteGrade(force: false)
+        routeCue(rr)
+        if distanceM >= rr.length {
+            say("Route complete. Great ride!")
+            end()
+        }
+    }
+
+    private func sendRouteGrade(force: Bool) {
+        guard let rr = route else { return }
+        let g = rr.route.sample(at: rr.startM + distanceM).grade
+        if force || lastGradeSent == nil || abs(g - (lastGradeSent ?? 0)) >= 0.3 || elapsed - lastGradeSentAt >= 10 {
+            lastGradeSent = g
+            lastGradeSentAt = elapsed
+            ble.setGrade(g)
+        }
+    }
+
+    private func routeCue(_ rr: RouteRide) {
+        let frac = distanceM / max(1, rr.length)
+        for pct in [25, 50, 75] where frac >= Double(pct) / 100 && !routeCues.contains(pct) {
+            routeCues.insert(pct)
+            say("\(pct) percent done. \(String(format: "%.1f", routeRemaining / 1000)) kilometres to go.")
+        }
+        if routeRemaining <= 1000 && rr.length > 3000 && !routeCues.contains(1000) {
+            routeCues.insert(1000)
+            say("One kilometre to go.")
+        }
+    }
+
     private func applyTarget(force: Bool) {
+        if route != nil { sendRouteGrade(force: force); return }
         let seg = segment
         if seg.erg {
             let t = Int((seg.targetWatts(ftp: ftp, at: segElapsed) * intensityScale).rounded())

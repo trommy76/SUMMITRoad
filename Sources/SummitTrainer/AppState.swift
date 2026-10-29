@@ -30,6 +30,7 @@ final class Store: ObservableObject {
     var planChangeCount = 0               // counts local plan edits so a finished push only clears "unsent" if nothing changed meanwhile
     var settingsChangeCount = 0
     @Published var rides: [RideSummary] = []
+    @Published var routes: [Route] = []
 
     /// Hooks used by the optional home-server sync.
     var onRideSaved: ((RideSummary) -> Void)?
@@ -59,7 +60,7 @@ final class Store: ObservableObject {
         } else {
             dir = base.appendingPathComponent("SummitTrainer", isDirectory: true)
         }
-        for sub in ["", "rides", "fit"] {
+        for sub in ["", "rides", "fit", "routes"] {
             try? FileManager.default.createDirectory(at: dir.appendingPathComponent(sub), withIntermediateDirectories: true)
         }
         if let p: Profile = read("profile.json") { profile = p }
@@ -69,6 +70,7 @@ final class Store: ObservableObject {
                 .compactMap { try? decoder.decode(RideSummary.self, from: Data(contentsOf: $0)) }
                 .sorted { $0.date > $1.date }
         }
+        reloadRoutes()
         hasPreviousPlan = FileManager.default.fileExists(atPath: dir.appendingPathComponent("plan.previous.json").path)
         loading = false
     }
@@ -132,6 +134,38 @@ final class Store: ObservableObject {
         write(ride, "rides/\(ride.id.uuidString).json")
         try? FITEncoder.encode(ride).write(to: fitURL(for: ride), options: .atomic)
         if !fromSync { onRideSaved?(ride) }
+    }
+
+    // MARK: Routes (GPX files kept in the app's data folder, never synced or uploaded)
+
+    var routesDir: URL { dir.appendingPathComponent("routes", isDirectory: true) }
+
+    func reloadRoutes() {
+        let files = (try? FileManager.default.contentsOfDirectory(at: routesDir, includingPropertiesForKeys: nil)) ?? []
+        routes = files.filter { $0.pathExtension.lowercased() == "gpx" }
+            .compactMap { url in
+                guard let data = try? Data(contentsOf: url) else { return nil }
+                return try? RouteBuilder.route(fromGPX: data, name: url.deletingPathExtension().lastPathComponent)
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// Validates a GPX file and copies it into the routes folder under the given name.
+    @discardableResult
+    func importRoute(from url: URL, name: String) throws -> Route {
+        let data = try Data(contentsOf: url)
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: " -_()'&."))
+        var clean = String(name.unicodeScalars.filter { allowed.contains($0) }).trimmingCharacters(in: .whitespaces)
+        if clean.isEmpty { clean = "Route" }
+        let route = try RouteBuilder.route(fromGPX: data, name: clean)      // throws if it is not usable
+        try data.write(to: routesDir.appendingPathComponent(clean + ".gpx"), options: .atomic)
+        reloadRoutes()
+        return route
+    }
+
+    func deleteRoute(_ r: Route) {
+        try? FileManager.default.removeItem(at: routesDir.appendingPathComponent(r.name + ".gpx"))
+        reloadRoutes()
     }
 
     func fitURL(for r: RideSummary) -> URL { dir.appendingPathComponent("fit/\(r.id.uuidString).fit") }
@@ -199,6 +233,21 @@ final class AppState: ObservableObject {
         session = s
     }
 
+    /// Starts a simulated route ride: the trainer's resistance follows the road's gradient.
+    func startRoute(_ ride: RouteRide, effort: Double = 0.65) {
+        guard session == nil else { return }
+        let ftpNow = store.profile.ftp ?? 200
+        let estimate = RoutePhysics.estimatedSeconds(route: ride.route, from: ride.startM, to: ride.endM, power: ftpNow * effort, mass: ride.mass)
+        var w = Workout(name: "\(ride.route.name) · \(String(format: "%.1f", ride.length / 1000)) km", kind: .adhoc, ftp: ftpNow,
+                        segments: [Segment(label: "Route", seconds: max(60, Int(estimate)), startPct: 0, kind: .endurance, erg: false)])
+        w.note = "Simulated ride: the trainer's resistance follows the road's gradient, so your effort decides your speed."
+        let s = RideSession(workout: w, planned: nil, ble: ble, ftp: ftpNow, maxHR: store.profile.maxHR, voice: store.profile.voiceCues)
+        s.route = ride
+        s.waitForPedal = store.profile.waitForPedal ?? true
+        s.onFinish = { [weak self] summary in self?.finish(summary, workout: w) }
+        session = s
+    }
+
     func discardSession() {
         session?.onFinish = nil
         session?.end()
@@ -248,7 +297,8 @@ final class AppState: ObservableObject {
         do {
             let desc = "SummitRoad · \(ride.workoutName) · NP \(Int(ride.np)) W · TSS \(Int(ride.tss))"
                 + (ride.score.map { " · Score \(Int($0.total))" } ?? "")
-            let id = try await strava.upload(fit: data, name: ride.workoutName, description: desc)
+            let id = try await strava.upload(fit: data, name: ride.workoutName, description: desc,
+                                             virtual: ride.samples.contains { $0.lat != nil })
             var updated = ride
             updated.stravaID = id
             store.save(ride: updated)
