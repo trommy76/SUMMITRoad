@@ -12,12 +12,20 @@ All screenshots use demo data.
 |---|---|
 | **Calendar**: planned workouts with a profile preview, completed rides with their score, and weekly hours/TSS | **Today**: your FTP and the next workout |
 | ![Calendar](docs/screenshots/app-calendar.png) | ![Today](docs/screenshots/app-today.png) |
-| **Training Plan**: Base, Build and Specialty weeks that adapt to how you ride | **Workouts**: ad-hoc workouts scaled to your FTP, with drills and an intensity override |
+| **Training Plan**: Base, Build and Specialty weeks that adapt to how you ride | **Workouts**: GPX routes, plus ad-hoc workouts scaled to your FTP with drills and an intensity override |
 | ![Training Plan](docs/screenshots/app-plan.png) | ![Workouts](docs/screenshots/app-workouts.png) |
 
 **The ride screen**: power, interval time and heart rate on top; target, workout time and cadence below; interval stats and the workout profile with your live trace.
 
 ![Ride screen](docs/screenshots/app-ride.png)
+
+**Routes** (see [Routes (GPX)](#routes-gpx)): pick a section of a GPX route to fit the time you have, then ride it in simulation mode. The elevation profile is coloured by gradient, with a bike at your position.
+
+| | |
+|---|---|
+| ![Route picker](docs/screenshots/app-route-picker.png) | ![Route ride](docs/screenshots/app-route-ride.png) |
+
+(The routes in these screenshots are made-up demo routes.)
 
 **Ride report**: training score, coach feedback and a chart you can hover for the values at each point; send the .FIT file to Strava or Garmin.
 
@@ -80,6 +88,25 @@ Or open `Package.swift` in Xcode and press Run. If running from Xcode, Bluetooth
 ## Ride screen
 
 Power / Interval time / Heart rate, Target / Workout time / Cadence, workout profile with your live power trace, interval stats (INT POW/HR/CAD, TSS, kJ, NP, AVG POW), coaching banner (interval starts, halfway, 1 min / 30 s / 10 s, 5-4-3-2-1 countdown, cadence and HR nudges, optional spoken cues). Space = pause. ±5% intensity, skip interval, end.
+
+## Workouts outside your plan
+
+The **Workouts** tab has ad-hoc sessions that are scaled to your FTP and don't touch your plan: easy spins, endurance rides, tempo, sweet spot, threshold, over-unders, VO2 and 30/30s, plus drills (spin-ups, cadence ladder, one-leg drills, low-cadence strength) and a free ride. Before you start you can scale the whole session between 60% and 120% of its targets ("relax" or "push"). **Start Workout** waits until you actually start pedalling before the clock and the trainer's resistance begin (switch this off in Settings).
+
+## Routes (GPX)
+
+Ride any GPX route in **simulation mode**: instead of holding a power target (ERG), the trainer's resistance follows the road's gradient and you choose the effort.
+
+1. **Workouts > Routes > Import GPX…** and give the route a name. The GPX needs elevation data (recorded rides exported from Strava or Garmin have it). The file is copied into the app's data folder on your Mac (`~/Library/Application Support/SummitTrainer/routes`) and is never uploaded or synced.
+2. Open the route, then use the **Start/Finish sliders** to choose a section, or **Fit to 60 / 75 / 90 min** to pick a finish point for the time you have. The estimate comes from your power at the chosen effort (Easy 55%, Endurance 65%, Tempo 80%, Hard 95% of FTP), the gradient and your weight.
+3. Set **Rider + bike weight** (Settings > Athlete, default 80 kg). It is used to work out your speed and progress along the route from your power.
+4. **Start Ride.** The ride screen shows the colour-coded elevation profile (blue flat, then green, yellow, orange and red as it gets steeper) with a bike at your position, the part you've ridden dimmed, and distance left, grade, elevation and speed alongside your power, heart rate and cadence. The ride ends at the finish.
+
+Gradients are smoothed over about 160 m and limited to -10% to +15%, so the resistance changes gradually. Route rides have no training score.
+
+**Uploading:** a route ride is saved as a **virtual ride** with the route's GPS track, speed, distance, altitude, gradient and total climbing, so Strava and Garmin can draw the map and the elevation. That means the roads of your route end up on those sites, so check Strava's privacy zone first if a route starts near home.
+
+Resistance depends on how your trainer turns a gradient into feel, which varies between trainers. If climbs feel too easy or too hard, please say so.
 
 ## Training score (0-100)
 
