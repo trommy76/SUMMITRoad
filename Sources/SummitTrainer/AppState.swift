@@ -174,6 +174,7 @@ final class Store: ObservableObject {
         rides.removeAll { $0.id == ride.id }
         remove("rides/\(ride.id.uuidString).json")
         remove("fit/\(ride.id.uuidString).fit")
+        remove("cards/\(ride.id.uuidString).png")
         if !fromSync { onRideDeleted?(ride.id) }
     }
 

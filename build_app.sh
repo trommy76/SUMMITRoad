@@ -10,6 +10,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/apple/Products/Release/SummitTrainer "$APP/Contents/MacOS/SummitTrainer"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+[ -d Resources/Backgrounds ] && cp -R Resources/Backgrounds "$APP/Contents/Resources/Backgrounds" || true
 VERSION=$(tr -d '[:space:]' < VERSION)
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" -c "Set :CFBundleVersion $VERSION" "$APP/Contents/Info.plist"
 codesign --force --deep --sign - "$APP"

@@ -42,7 +42,7 @@ struct RootView: View {
 }
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case calendar = "Calendar", today = "Today", plan = "Training Plan", workouts = "Workouts", ftp = "FTP Test", history = "History", devices = "Devices", settings = "Settings"
+    case calendar = "Calendar", today = "Today", plan = "Training Plan", workouts = "Workouts", ftp = "FTP Test", levels = "Levels", history = "History", devices = "Devices", settings = "Settings"
     var id: String { rawValue }
     var icon: String {
         switch self {
@@ -51,6 +51,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .plan: return "list.bullet.rectangle"
         case .workouts: return "figure.indoor.cycle"
         case .ftp: return "gauge.high"
+        case .levels: return "chart.bar.fill"
         case .history: return "clock.arrow.circlepath"
         case .devices: return "antenna.radiowaves.left.and.right"
         case .settings: return "gearshape"
@@ -59,7 +60,7 @@ enum AppTab: String, CaseIterable, Identifiable {
 }
 
 extension AppTab {
-    static let mainTabs: [AppTab] = [.calendar, .today, .plan, .workouts, .ftp, .history]
+    static let mainTabs: [AppTab] = [.calendar, .today, .plan, .workouts, .ftp, .levels, .history]
     static let footerTabs: [AppTab] = [.devices, .settings]
 }
 
@@ -111,6 +112,7 @@ struct MainView: View {
             case .plan: PlanView()
             case .workouts: WorkoutsView()
             case .ftp: FTPTestView()
+            case .levels: LevelsView()
             case .history: HistoryView()
             case .devices: DevicesView()
             case .settings: SettingsView()

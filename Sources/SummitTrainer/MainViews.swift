@@ -470,6 +470,8 @@ struct RideReportView: View {
 
                 SampleChart(samples: r.samples).frame(height: 180).cornerRadius(8)
 
+                LevelCardSection(ride: r)
+
                 if !r.feedback.isEmpty {
                     Card {
                         VStack(alignment: .leading, spacing: 10) {
