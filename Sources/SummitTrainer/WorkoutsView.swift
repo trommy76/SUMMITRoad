@@ -54,8 +54,14 @@ private struct AdhocDetail: View {
     let close: () -> Void
     @EnvironmentObject var app: AppState
     @EnvironmentObject var store: Store
-    @State private var option = 0
+    @State private var option: Int
     @State private var intensity = 1.0
+
+    init(adhoc: AdhocWorkout, close: @escaping () -> Void) {
+        self.adhoc = adhoc
+        self.close = close
+        _option = State(initialValue: adhoc.defaultValue)
+    }
 
     private var ftp: Double { store.profile.ftp ?? 200 }
     private var workout: Workout { adhoc.build(ftp, option) }
@@ -105,6 +111,5 @@ private struct AdhocDetail: View {
         }
         .padding(24)
         .frame(width: 640)
-        .onAppear { option = adhoc.defaultValue }
     }
 }
