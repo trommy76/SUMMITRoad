@@ -1040,7 +1040,7 @@ nav{display:flex;gap:4px;margin-left:12px}nav a{color:var(--mut);text-decoration
 <div class="card" id="appCard" style="margin-top:20px"><h2>App passwords</h2>
 <div class="muted" style="margin-bottom:10px">The SummitRoad Mac app signs in with one of these (Settings &gt; Home Server &gt; Update Login). While two-factor is on, your normal password no longer works in the app. You can make one per computer and revoke it any time.</div>
 <div class="scroll"><table><thead><tr><th>Name</th><th>Created</th><th>Last used</th><th></th></tr></thead><tbody id="appRows"></tbody></table></div>
-<form class="row" onsubmit="makeAppPw();return false" autocomplete="off" style="margin-top:10px"><input type="text" id="appName" value="Mac app" placeholder="Name, e.g. Kevin's MacBook" autocomplete="off"><button type="submit">Create app password</button></form><div id="appMsg" class="msg"></div></div>
+<form class="row" onsubmit="makeAppPw();return false" autocomplete="off" style="margin-top:10px"><input type="text" id="appName" value="Mac app" placeholder="Name, e.g. Studio MacBook" autocomplete="off"><button type="submit">Create app password</button></form><div id="appMsg" class="msg"></div></div>
 <div class="card" id="usersCard" style="display:none;margin-top:20px"><h2>Users (admin)</h2>
 <div class="scroll"><table><thead><tr><th>User</th><th>Role</th><th>Rides</th><th>2FA</th><th></th></tr></thead><tbody id="users"></tbody></table></div>
 <h2 style="margin-top:16px">Add a user</h2>

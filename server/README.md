@@ -86,7 +86,7 @@ Command-line alternative (also how to recover a forgotten admin password):
 
 ```bash
 docker exec -it summitroad python server.py adduser anna            # new user, prompts for a password
-docker exec -it summitroad python server.py adduser kevin --admin   # reset a password / make an admin
+docker exec -it summitroad python server.py adduser alex --admin   # reset a password / make an admin
 docker exec -it summitroad python server.py users                   # list users
 ```
 
