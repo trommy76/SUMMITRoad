@@ -31,6 +31,14 @@ All screenshots use demo data.
 
 ![Ride report](docs/screenshots/app-ride-report.png)
 
+**Levels**: your level from 0 to 10 in each power zone, and how it has changed over the last 30 days.
+
+![Levels](docs/screenshots/app-levels.png)
+
+**Levels image**: every ride report ends with a shareable Athlete Levels picture (this one is from a demo ride). Save it, copy it or reveal it in Finder; a copy is stored with the ride.
+
+![Athlete Levels image](docs/screenshots/app-levels-image.png)
+
 **Settings**: FTP, Strava, the optional home server, updates and data.
 
 ![Settings](docs/screenshots/app-settings.png)
@@ -92,6 +100,12 @@ Power / Interval time / Heart rate, Target / Workout time / Cadence, workout pro
 ## Workouts outside your plan
 
 The **Workouts** tab has ad-hoc sessions that are scaled to your FTP and don't touch your plan: easy spins, endurance rides, tempo, sweet spot, threshold, over-unders, VO2 and 30/30s, plus drills (spin-ups, cadence ladder, one-leg drills, low-cadence strength) and a free ride. Before you start you can scale the whole session between 60% and 120% of its targets ("relax" or "push"). **Start Workout** waits until you actually start pedalling before the clock and the trainer's resistance begin (switch this off in Settings).
+
+## Athlete levels
+
+The **Levels** tab scores you from 0 to 10 in six zones: Endurance, Tempo, Sweet Spot, Threshold, VO2Max and Anaerobic. Each zone is judged on the best average power you have held for a time that represents it (90 min, 45 min, 30 min, 20 min, 5 min and 1 min), as a fraction of your current FTP, over the last 90 days. A zone only moves when a ride includes an effort that long, and the tab shows your best watts for each plus the change over 30 days. These are SummitRoad's own estimates, not TrainerRoad's progression levels.
+
+After each ride the report shows an **Athlete Levels image**: your bars, what that ride added (in green), and the ride's power and heart rate along the bottom, over a darkened photo. The photo is picked from the ones in `Resources/Backgrounds`, the same one every time for a given ride. To use your own, put .jpg or .png files in `~/Library/Application Support/SummitTrainer/backgrounds/`; if that folder has any, they are used instead. Strava and Garmin can't take a picture on upload, so the image stays on your Mac (save or share it by hand).
 
 ## Routes (GPX)
 
