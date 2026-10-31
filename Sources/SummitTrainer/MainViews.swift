@@ -69,8 +69,11 @@ struct TodayView: View {
                             }
                             WorkoutChart(workout: w, ftp: w.kind.isTest ? w.ftp : ftp, elapsed: -1, samples: [])
                                 .frame(height: 120).cornerRadius(8)
-                            Button("Start Workout") { app.start(w, planned: next) }
-                                .buttonStyle(.borderedProminent).controlSize(.large)
+                            HStack {
+                                Button("Start Workout") { app.start(w, planned: next) }
+                                    .buttonStyle(.borderedProminent).controlSize(.large)
+                                PostponeButton(planned: next)
+                            }
                         }
                     }
                 } else if store.profile.ftp != nil {
@@ -756,6 +759,8 @@ struct SettingsView: View {
                                 value: Binding(get: { store.profile.riderWeightKg ?? 80 }, set: { store.profile.riderWeightKg = $0 }), in: 40...200, step: 1)
                         Toggle("Wait until I start pedalling before the workout begins",
                                isOn: Binding(get: { store.profile.waitForPedal ?? true }, set: { store.profile.waitForPedal = $0 }))
+                        Toggle("Pause automatically when I stop pedalling (resumes when I start again)",
+                               isOn: Binding(get: { store.profile.autoPause ?? true }, set: { store.profile.autoPause = $0 }))
                     }
                 }
 

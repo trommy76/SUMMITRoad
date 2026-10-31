@@ -230,6 +230,7 @@ final class AppState: ObservableObject {
                             maxHR: store.profile.maxHR, voice: store.profile.voiceCues)
         s.intensityScale = intensity
         s.waitForPedal = store.profile.waitForPedal ?? true
+        s.autoPause = store.profile.autoPause ?? true
         s.onFinish = { [weak self] summary in self?.finish(summary, workout: workout) }
         session = s
     }
@@ -245,6 +246,7 @@ final class AppState: ObservableObject {
         let s = RideSession(workout: w, planned: nil, ble: ble, ftp: ftpNow, maxHR: store.profile.maxHR, voice: store.profile.voiceCues)
         s.route = ride
         s.waitForPedal = store.profile.waitForPedal ?? true
+        s.autoPause = store.profile.autoPause ?? true
         s.onFinish = { [weak self] summary in self?.finish(summary, workout: w) }
         session = s
     }

@@ -64,6 +64,8 @@ final class RideSession: ObservableObject {
     @Published var waitingPower = 0          // live readings shown while waiting for the first pedal strokes
     @Published var waitingCadence: Int?
     var waitForPedal = true                  // false: Start Workout begins at once
+    var autoPause = true                     // pause when pedalling stops, resume when it starts again
+    @Published var autoPaused = false        // the current pause was automatic, so pedalling resumes it
     /// Set for a simulated route ride: gradient is sent to the trainer and progress comes from power, gradient and weight.
     var route: RouteRide?
     @Published var distanceM = 0.0           // metres ridden along the chosen section
@@ -80,6 +82,8 @@ final class RideSession: ObservableObject {
 
     private var timer: Timer?
     private var waitTimer: Timer?
+    private var pauseTimer: Timer?
+    private var stoppedSeconds = 0
     private var pedalPolls = 0
     private var lastSentTarget = -1
     private var lowCadenceSeconds = 0
@@ -189,20 +193,69 @@ final class RideSession: ObservableObject {
 
     func togglePause() {
         if state == .running {
-            state = .paused
-            timer?.invalidate()
-            ble.pauseWorkout()
-            ble.setTargetPower(50)
+            pause(auto: false)
             say("Paused. Take a breath. Press resume when you're ready.")
         } else if state == .paused {
-            state = .running
-            ble.startWorkout()
-            applyTarget(force: true)
-            timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-                Task { @MainActor in self?.tick() }
-            }
+            resume()
             say("Back at it. Let's go!")
         }
+    }
+
+    private func pause(auto: Bool) {
+        guard state == .running else { return }
+        state = .paused
+        autoPaused = auto
+        stoppedSeconds = 0
+        timer?.invalidate()
+        timer = nil
+        ble.pauseWorkout()
+        ble.setTargetPower(50)
+        if auto {
+            message = "Paused: you stopped pedalling. Start pedalling to carry on."
+            pedalPolls = 0
+            pauseTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.pollForResume() }
+            }
+        } else {
+            message = "Paused. Press Resume when you're ready."
+        }
+    }
+
+    private func resume() {
+        guard state == .paused else { return }
+        pauseTimer?.invalidate()
+        pauseTimer = nil
+        state = .running
+        autoPaused = false
+        stoppedSeconds = 0
+        message = "Back at it."
+        ble.startWorkout()
+        applyTarget(force: true)
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.tick() }
+        }
+    }
+
+    /// After an automatic pause: same test as the start (real power or a cadence, three checks in a row), so a single
+    /// bump of the pedals doesn't resume it.
+    private func pollForResume() {
+        guard state == .paused, autoPaused else { return }
+        let r = readings()
+        let pedalling = (r.power ?? 0) >= 20 || (r.cadence ?? 0) >= 30
+        pedalPolls = pedalling ? pedalPolls + 1 : 0
+        if pedalPolls >= 3 {
+            resume()
+            say("Back at it. Let's go!")
+        }
+    }
+
+    /// Stopped = no power and no cadence. Route rides are left alone (coasting down a descent is normal there) and so is the
+    /// ramp test, which ends when you can't keep going.
+    private func checkStopped() -> Bool {
+        guard autoPause, route == nil, workout.kind != .ftpRamp else { return false }
+        let stopped = power < 10 && (cadence ?? 0) < 10
+        stoppedSeconds = stopped ? stoppedSeconds + 1 : 0
+        return stoppedSeconds >= 5
     }
 
     func skipInterval() {
@@ -221,6 +274,8 @@ final class RideSession: ObservableObject {
         timer = nil
         waitTimer?.invalidate()
         waitTimer = nil
+        pauseTimer?.invalidate()
+        pauseTimer = nil
         if state != .finished {
             state = .finished
             ble.setTargetPower(0)
@@ -239,6 +294,11 @@ final class RideSession: ObservableObject {
         power = r.power ?? 0
         hr = r.hr
         cadence = r.cadence
+        if checkStopped() {
+            pause(auto: true)
+            say("Paused: you stopped pedalling. Start pedalling to carry on.")
+            return
+        }
         let base = seg.erg ? Int(seg.targetWatts(ftp: ftp, at: segElapsed).rounded()) : nil
         targetPower = base.map { Int((Double($0) * intensityScale).rounded()) }
 

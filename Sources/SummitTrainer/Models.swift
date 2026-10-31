@@ -258,6 +258,7 @@ struct Profile: Codable {
     var planDirty: Bool?              // true while this Mac has plan changes the server has not accepted yet
     var settingsDirty: Bool?
     var waitForPedal: Bool?           // nil = on: Start Workout waits until you pedal
+    var autoPause: Bool?              // nil = on: pause when you stop pedalling, resume when you start again
     var riderWeightKg: Double?        // rider + bike, used for route rides (nil = 80)
 }
 

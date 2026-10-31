@@ -275,6 +275,7 @@ private struct PlannedDetail: View {
                     .frame(height: 140).cornerRadius(8)
                 HStack {
                     Button("Close", action: close)
+                    if planned.completedDate == nil { PostponeButton(planned: planned, onDone: close) }
                     Spacer()
                     if store.profile.ftp != nil {
                         Button("Start Workout") { close(); app.start(w, planned: planned) }
