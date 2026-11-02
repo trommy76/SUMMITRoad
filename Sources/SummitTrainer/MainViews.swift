@@ -335,9 +335,21 @@ struct FTPTestView: View {
 struct HistoryView: View {
     @EnvironmentObject var store: Store
     @State private var selected: UUID?
+    @State private var importing = false
+    @State private var importMessage: String?
 
     var body: some View {
         HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                HStack {
+                    Button { importing = true } label: { Label("Import rides…", systemImage: "square.and.arrow.down") }
+                    Spacer()
+                }
+                .padding(8)
+                if let m = importMessage {
+                    Text(m).font(.caption).foregroundColor(.gray).frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10).padding(.bottom, 6)
+                }
             List(store.rides, selection: $selected) { r in
                 VStack(alignment: .leading) {
                     Text(r.workoutName).bold()
@@ -350,7 +362,11 @@ struct HistoryView: View {
                 }
                 .tag(r.id)
             }
+            }
             .frame(width: 300)
+            .fileImporter(isPresented: $importing, allowedContentTypes: [.fitFile, .tcxFile, .gzip], allowsMultipleSelection: true) { result in
+                if case .success(let urls) = result { importMessage = store.importRides(from: urls) }
+            }
             Divider()
             if let id = selected, let r = store.rides.first(where: { $0.id == id }) {
                 RideReportView(rideID: r.id, fallback: r, isReview: false)

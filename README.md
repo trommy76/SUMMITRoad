@@ -109,6 +109,10 @@ The **Levels** tab scores you from 0 to 10 in six zones: Endurance, Tempo, Sweet
 
 After each ride the report shows an **Athlete Levels image**: your bars, what that ride added (in green), and the ride's power and heart rate along the bottom, over a darkened photo. The photo is picked from the ones in `Resources/Backgrounds`, the same one every time for a given ride. To use your own, put .jpg or .png files in `~/Library/Application Support/SummitTrainer/backgrounds/`; if that folder has any, they are used instead. Strava and Garmin can't take a picture on upload, so the image stays on your Mac (save or share it by hand).
 
+## Importing rides
+
+On the Rides tab, **Import rides…** brings in rides recorded elsewhere (a bike computer, Zwift, Strava's export). It reads `.fit`, `.tcx` and gzipped files such as `.fit.gz`. Imported rides need power data: they count towards your athlete levels and training load but have no workout score. Rides already in your history are skipped, and imported rides are not uploaded to Strava.
+
 ## Postponing a workout
 
 If something comes up, open the planned workout (from the calendar, or **Today**) and press **Postpone…**. Choose how many days to move it, and whether it's just that workout or that workout and every later one, so the rest of the plan keeps its shape. Finished workouts never move. The change syncs to the home server like any other plan edit.
