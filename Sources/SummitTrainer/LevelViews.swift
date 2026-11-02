@@ -164,6 +164,11 @@ enum LevelCard {
 }
 
 extension Store {
+    /// Rides that count towards levels: estimated-power rides only if the setting allows it.
+    var levelRides: [RideSummary] {
+        profile.countEstimatedPower == true ? rides : rides.filter { $0.estimatedPower != true }
+    }
+
     func cardURL(for r: RideSummary) -> URL { dir.appendingPathComponent("cards/\(r.id.uuidString).png") }
     var backgroundsDir: URL { dir.appendingPathComponent("backgrounds", isDirectory: true) }
 }
@@ -202,7 +207,7 @@ struct LevelCardSection: View {
 
     private func make() {
         let ftp = store.profile.ftp ?? ride.ftp
-        var all = store.rides
+        var all = store.levelRides
         if !all.contains(where: { $0.id == ride.id }) { all.append(ride) }
         guard let data = LevelCard.png(ride: ride, rides: all, ftp: ftp, userDir: store.backgroundsDir) else { return }
         let url = store.cardURL(for: ride)
@@ -232,8 +237,8 @@ struct LevelsView: View {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Levels").font(.largeTitle.bold())
                 if let ftp {
-                    let now = Levels.levels(rides: store.rides, ftp: ftp)
-                    let monthAgo = Levels.levels(rides: store.rides, asOf: Date().addingTimeInterval(-30 * 86400), ftp: ftp)
+                    let now = Levels.levels(rides: store.levelRides, ftp: ftp)
+                    let monthAgo = Levels.levels(rides: store.levelRides, asOf: Date().addingTimeInterval(-30 * 86400), ftp: ftp)
                     Text("How strong you are in each zone, from 0 to 10, judged on your best effort of the right length in the last \(Levels.windowDays) days. Ride hard efforts and the bars move.")
                         .foregroundColor(.gray)
                     Card {
@@ -258,7 +263,7 @@ struct LevelsView: View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(z.rawValue).font(.headline)
-                Text(Levels.bestWatts(z, rides: store.rides).map { "best \(z.durationText): \(Int($0.rounded())) W" } ?? "no \(z.durationText) effort yet")
+                Text(Levels.bestWatts(z, rides: store.levelRides).map { "best \(z.durationText): \(Int($0.rounded())) W" } ?? "no \(z.durationText) effort yet")
                     .font(.caption).foregroundColor(.gray)
             }
             .frame(width: 190, alignment: .leading)

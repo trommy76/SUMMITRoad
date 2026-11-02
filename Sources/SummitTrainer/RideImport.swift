@@ -10,7 +10,7 @@ enum RideImportError: Error, LocalizedError {
         case .unreadable: return "the file could not be read"
         case .unsupported: return "only .fit and .tcx files are supported"
         case .noPoints: return "no ride data found"
-        case .noPower: return "no power data, so it can't count towards your levels"
+        case .noPower: return "no power data, and no speed or position data to estimate it from"
         case .tooLong: return "the ride is longer than 24 hours"
         }
     }
@@ -28,7 +28,7 @@ private struct RawPoint {
 }
 
 enum RideImporter {
-    static func ride(from url: URL, ftp: Double) throws -> RideSummary {
+    static func ride(from url: URL, ftp: Double, mass: Double = 80) throws -> RideSummary {
         guard var data = try? Data(contentsOf: url) else { throw RideImportError.unreadable }
         var name = url.lastPathComponent
         if data.starts(with: [0x1F, 0x8B]) {
@@ -45,7 +45,7 @@ enum RideImporter {
         } else {
             throw RideImportError.unsupported
         }
-        return try build(points, title: (name as NSString).deletingPathExtension, ftp: ftp)
+        return try build(points, title: (name as NSString).deletingPathExtension, ftp: ftp, mass: mass)
     }
 
     private static func gunzip(_ data: Data) -> Data? {
@@ -67,10 +67,10 @@ enum RideImporter {
     }
 
     /// Turns the file's points into the app's 1 Hz samples. A gap of more than 10 s counts as stopped (0 W).
-    private static func build(_ raw: [RawPoint], title: String, ftp: Double) throws -> RideSummary {
+    private static func build(_ raw: [RawPoint], title: String, ftp: Double, mass: Double) throws -> RideSummary {
         let pts = raw.sorted { $0.time < $1.time }
         guard let first = pts.first, let last = pts.last, pts.count > 1 else { throw RideImportError.noPoints }
-        guard pts.contains(where: { ($0.power ?? 0) > 0 }) else { throw RideImportError.noPower }
+        let measured = pts.contains(where: { ($0.power ?? 0) > 0 })
         let dur = Int(last.time.timeIntervalSince(first.time))
         guard dur > 0 else { throw RideImportError.noPoints }
         guard dur <= 24 * 3600 else { throw RideImportError.tooLong }
@@ -88,6 +88,10 @@ enum RideImporter {
                                   alt: p.alt, grade: nil, lat: p.lat, lon: p.lon))
         }
 
+        if !measured {
+            guard let est = PowerEstimator.watts(samples, mass: mass) else { throw RideImportError.noPower }
+            for i in samples.indices { samples[i].power = est[i] }
+        }
         let power = samples.map { Double($0.power) }
         let npv = Metrics.normalizedPower(power)
         let hrs = samples.compactMap { $0.hr }
@@ -99,8 +103,10 @@ enum RideImporter {
             tss: Metrics.tss(np: npv, ftp: ftp, seconds: dur), kj: power.reduce(0, +) / 1000.0,
             avgHR: hrs.isEmpty ? nil : hrs.reduce(0, +) / hrs.count, maxHR: hrs.max(),
             avgCadence: cads.isEmpty ? nil : cads.reduce(0, +) / cads.count,
-            score: nil, feedback: ["Imported from a file. It counts towards your levels but has no workout score."],
-            ftpResult: nil, stravaID: nil, samples: samples)
+            score: nil,
+            feedback: [measured ? "Imported from a file. It counts towards your levels but has no workout score."
+                                : "Imported from a file with no power meter data. Power is estimated from speed and elevation, so treat it as rough. It does not count towards levels unless you turn that on in Settings."],
+            ftpResult: nil, stravaID: nil, samples: samples, estimatedPower: measured ? nil : true)
     }
 
     // MARK: FIT
@@ -280,7 +286,7 @@ extension Store {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             do {
-                let r = try RideImporter.ride(from: url, ftp: profile.ftp ?? 0)
+                let r = try RideImporter.ride(from: url, ftp: profile.ftp ?? 0, mass: profile.riderWeightKg ?? 80)
                 if rides.contains(where: { abs($0.date.timeIntervalSince(r.date)) < 60 && abs($0.durationSeconds - r.durationSeconds) < 120 }) {
                     duplicates += 1
                     continue
@@ -302,4 +308,79 @@ extension Store {
 extension UTType {
     static let fitFile = UTType(filenameExtension: "fit") ?? .data
     static let tcxFile = UTType(filenameExtension: "tcx") ?? .xml
+}
+
+/// Estimates power for a ride recorded without a power meter, from speed, gradient and acceleration.
+/// There is no wind, drafting or surface in the file, so this is a rough guide, not a measurement.
+enum PowerEstimator {
+    /// One estimate per sample (1 Hz), or nil if the ride has neither speed nor position to work from.
+    static func watts(_ s: [Sample], mass: Double) -> [Int]? {
+        let n = s.count
+        guard n > 20 else { return nil }
+        // Speed in m/s: recorded, else from the distance between positions.
+        var v = [Double](repeating: 0, count: n)
+        if s.contains(where: { ($0.speed ?? 0) > 0 }) {
+            for i in 0..<n { v[i] = (s[i].speed ?? 0) / 3.6 }
+        } else if s.contains(where: { $0.lat != nil && $0.lon != nil }) {
+            for i in 1..<n {
+                if let a = s[i - 1].lat, let b = s[i - 1].lon, let c = s[i].lat, let d = s[i].lon {
+                    v[i] = min(25, haversine(a, b, c, d))
+                }
+            }
+        } else {
+            return nil
+        }
+        v = smooth(v, 2)
+        var alt = [Double](repeating: 0, count: n)
+        let hasAlt = s.contains { $0.alt != nil }
+        if hasAlt {
+            var last = s.first(where: { $0.alt != nil })?.alt ?? 0
+            for i in 0..<n { if let a = s[i].alt { last = a }; alt[i] = last }
+            alt = smooth(alt, 4)
+        }
+        var dist = [Double](repeating: 0, count: n)
+        for i in 1..<n { dist[i] = dist[i - 1] + v[i] }
+
+        var out = [Int](repeating: 0, count: n)
+        let reach = 10
+        for i in 0..<n {
+            let speed = v[i]
+            if speed < 0.5 { continue }
+            var grade = 0.0
+            if hasAlt {
+                let a = max(0, i - reach), b = min(n - 1, i + reach)
+                let run = dist[b] - dist[a]
+                if run > 40 { grade = max(-0.15, min(0.15, (alt[b] - alt[a]) / run)) }
+            }
+            let a0 = max(0, i - 2), a1 = min(n - 1, i + 2)
+            let accel = a1 > a0 ? (v[a1] - v[a0]) / Double(a1 - a0) : 0
+            let theta = atan(grade)
+            let force = 0.5 * RoutePhysics.rho * RoutePhysics.cda * speed * speed
+                + mass * RoutePhysics.g * (sin(theta) + RoutePhysics.crr * cos(theta)) + mass * accel
+            let watts = force * speed / RoutePhysics.efficiency
+            out[i] = watts > 0 ? Int(min(1500, watts).rounded()) : 0   // freewheeling downhill is 0 W
+        }
+        return smoothInts(out, 2)
+    }
+
+    private static func haversine(_ lat1: Double, _ lon1: Double, _ lat2: Double, _ lon2: Double) -> Double {
+        let r = 6_371_000.0
+        let p1 = lat1 * .pi / 180, p2 = lat2 * .pi / 180
+        let dp = p2 - p1, dl = (lon2 - lon1) * .pi / 180
+        let a = sin(dp / 2) * sin(dp / 2) + cos(p1) * cos(p2) * sin(dl / 2) * sin(dl / 2)
+        return 2 * r * asin(min(1, sqrt(a)))
+    }
+
+    private static func smooth(_ x: [Double], _ k: Int) -> [Double] {
+        var out = x
+        for i in x.indices {
+            let a = max(0, i - k), b = min(x.count - 1, i + k)
+            out[i] = x[a...b].reduce(0, +) / Double(b - a + 1)
+        }
+        return out
+    }
+
+    private static func smoothInts(_ x: [Int], _ k: Int) -> [Int] {
+        smooth(x.map(Double.init), k).map { Int($0.rounded()) }
+    }
 }

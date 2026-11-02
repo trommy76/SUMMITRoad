@@ -111,7 +111,7 @@ After each ride the report shows an **Athlete Levels image**: your bars, what th
 
 ## Importing rides
 
-On the Rides tab, **Import rides…** brings in rides recorded elsewhere (a bike computer, Zwift, Strava's export). It reads `.fit`, `.tcx` and gzipped files such as `.fit.gz`. Imported rides need power data: they count towards your athlete levels and training load but have no workout score. Rides already in your history are skipped, and imported rides are not uploaded to Strava.
+On the Rides tab, **Import rides…** brings in rides recorded elsewhere (a bike computer, Zwift, Strava's export). It reads `.fit`, `.tcx` and gzipped files such as `.fit.gz`. Rides with power count towards your athlete levels and training load but have no workout score. Rides without a power meter are imported with power estimated from speed (or GPS position), elevation and your rider weight in Settings. That estimate ignores wind and drafting, so it is rough: those rides are marked as estimated and stay out of your levels unless you turn on *Count rides with estimated power* in Settings. Rides already in your history are skipped, and imported rides are not uploaded to Strava.
 
 ## Postponing a workout
 

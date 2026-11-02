@@ -489,7 +489,7 @@ struct RideReportView: View {
 
                 SampleChart(samples: r.samples).frame(height: 180).cornerRadius(8)
 
-                LevelCardSection(ride: r)
+                if r.estimatedPower != true || store.profile.countEstimatedPower == true { LevelCardSection(ride: r) }
 
                 if !r.feedback.isEmpty {
                     Card {
@@ -775,6 +775,8 @@ struct SettingsView: View {
                                 value: Binding(get: { store.profile.riderWeightKg ?? 80 }, set: { store.profile.riderWeightKg = $0 }), in: 40...200, step: 1)
                         Toggle("Wait until I start pedalling before the workout begins",
                                isOn: Binding(get: { store.profile.waitForPedal ?? true }, set: { store.profile.waitForPedal = $0 }))
+                        Toggle("Count rides with estimated power (imported without a power meter) towards levels",
+                               isOn: Binding(get: { store.profile.countEstimatedPower ?? false }, set: { store.profile.countEstimatedPower = $0 }))
                         Toggle("Pause automatically when I stop pedalling (resumes when I start again)",
                                isOn: Binding(get: { store.profile.autoPause ?? true }, set: { store.profile.autoPause = $0 }))
                     }

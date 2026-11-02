@@ -227,6 +227,7 @@ struct RideSummary: Codable, Identifiable {
     var ftpResult: Double?
     var stravaID: Int?
     var samples: [Sample]
+    var estimatedPower: Bool? = nil   // true when the power was worked out from speed and elevation (imported ride without a power meter)
 }
 
 // MARK: - Profile
@@ -259,7 +260,8 @@ struct Profile: Codable {
     var settingsDirty: Bool?
     var waitForPedal: Bool?           // nil = on: Start Workout waits until you pedal
     var autoPause: Bool?              // nil = on: pause when you stop pedalling, resume when you start again
-    var riderWeightKg: Double?        // rider + bike, used for route rides (nil = 80)
+    var riderWeightKg: Double?        // rider + bike, used for route rides and for estimating power on imports (nil = 80)
+    var countEstimatedPower: Bool?    // nil = off: rides with estimated power do not count towards levels
 }
 
 // MARK: - Metrics
