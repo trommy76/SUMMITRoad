@@ -36,8 +36,10 @@ struct CalendarView: View {
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     private var showSummary: Bool { sizeClass != .compact }   // no room for the week totals on an iPhone
+    private var agendaLayout: Bool { sizeClass == .compact }     // iPhone: a vertical list instead of the month grid
     #else
     private let showSummary = true
+    private let agendaLayout = false
     #endif
     @State private var openPlanned: PlannedWorkout?
     @State private var openRide: RideSummary?
@@ -83,6 +85,25 @@ struct CalendarView: View {
     }
 
     var body: some View {
+        if agendaLayout {
+            VStack(spacing: 0) {
+                header
+                Divider()
+                agenda
+            }
+            .sheet(item: $openPlanned) { p in PlannedDetail(planned: p, workout: plannedWorkout(p), ftp: ftp()) { openPlanned = nil } }
+            .sheet(item: $openRide) { r in
+                VStack(alignment: .trailing, spacing: 0) {
+                    Button("Close") { openRide = nil }.padding(10)
+                    RideReportView(rideID: r.id, fallback: r, isReview: false)
+                }
+            }
+        } else {
+            grid
+        }
+    }
+
+    private var grid: some View {
         VStack(spacing: 0) {
             header
             weekdayRow
@@ -229,7 +250,7 @@ struct CalendarView: View {
         .buttonStyle(.plain)
     }
 
-    private func weekSummary(_ days: [Date]) -> some View {
+    private func weekStats(_ days: [Date]) -> (planSec: Int, planTSS: Double, doneSec: Int, doneTSS: Double) {
         let plannedItems = days.flatMap { items(on: $0) }
         var planSec = 0, planTSS = 0.0, doneSec = 0, doneTSS = 0.0
         for item in plannedItems {
@@ -243,6 +264,126 @@ struct CalendarView: View {
                 }
             }
         }
+        return (planSec, planTSS, doneSec, doneTSS)
+    }
+
+    // MARK: iPhone agenda
+
+    private var agenda: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(weeks.indices, id: \.self) { i in
+                        let days = weeks[i].filter { cal.isDate($0, equalTo: month, toGranularity: .month) }
+                        let shown = days.filter { !items(on: $0).isEmpty || cal.isDateInToday($0) }
+                        if !days.isEmpty {
+                            agendaWeekHeader(weeks[i])
+                            ForEach(shown, id: \.self) { day in agendaDay(day).id(cal.startOfDay(for: day)) }
+                            if shown.isEmpty { Text("Nothing planned").font(.footnote).foregroundColor(.gray).padding(.horizontal, 16).padding(.vertical, 8) }
+                        }
+                    }
+                }
+                .padding(.bottom, 24)
+            }
+            .onAppear { scrollToToday(proxy) }
+            .onChange(of: month) { _ in scrollToToday(proxy) }
+        }
+    }
+
+    private func scrollToToday(_ proxy: ScrollViewProxy) {
+        guard cal.isDate(Date(), equalTo: month, toGranularity: .month) else { return }
+        DispatchQueue.main.async { proxy.scrollTo(cal.startOfDay(for: Date()), anchor: .top) }
+    }
+
+    private func agendaWeekHeader(_ days: [Date]) -> some View {
+        let st = weekStats(days)
+        let weekNo = cal.component(.weekOfYear, from: days[0])
+        return HStack {
+            Text("WEEK \(weekNo)").font(.caption.bold())
+            Spacer()
+            Text("\(hoursText(st.doneSec)) / \(hoursText(st.planSec)) h  ·  \(Int(st.doneTSS.rounded())) / \(Int(st.planTSS.rounded())) TSS")
+                .font(.caption).monospacedDigit()
+        }
+        .foregroundColor(.gray)
+        .padding(.horizontal, 16).padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .background(Color(white: 0.11))
+    }
+
+    private func agendaDay(_ day: Date) -> some View {
+        let isToday = cal.isDateInToday(day)
+        let list = items(on: day)
+        return HStack(alignment: .top, spacing: 12) {
+            VStack(spacing: 2) {
+                Text(day.formatted(.dateTime.weekday(.abbreviated)).uppercased()).font(.caption2.bold()).foregroundColor(.gray)
+                Text("\(cal.component(.day, from: day))").font(.title3.bold())
+                    .foregroundColor(isToday ? .white : .primary)
+                    .frame(width: 36, height: 36)
+                    .background(Circle().fill(isToday ? accentGreen : Color.clear))
+            }
+            .frame(width: 44)
+            VStack(spacing: 8) {
+                if list.isEmpty { Text("Rest day").font(.footnote).foregroundColor(.gray).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8) }
+                ForEach(list) { item in
+                    switch item {
+                    case .planned(let p): agendaPlanned(p)
+                    case .ride(let r): agendaRide(r)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 10)
+    }
+
+    private func agendaPlanned(_ p: PlannedWorkout) -> some View {
+        let w = plannedWorkout(p)
+        let missed = store.plan?.isMissed(p) ?? false
+        return Button { openPlanned = p } label: {
+            HStack(spacing: 12) {
+                if let w {
+                    WorkoutChart(workout: w, ftp: w.kind.isTest ? w.ftp : ftp(), elapsed: -1, samples: [])
+                        .frame(width: 84, height: 54).cornerRadius(4)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(p.phase.title) · Wk \(p.week)\(p.recoveryWeek ? " · Recovery" : "")")
+                        .font(.caption2.weight(.semibold)).foregroundColor(.gray).lineLimit(1)
+                    Text(w?.name ?? "Workout").font(.subheadline.bold()).lineLimit(2).multilineTextAlignment(.leading)
+                    if let w {
+                        Text("\(hoursText(w.totalSeconds)) h  ·  \(Int(w.estimatedTSS.rounded())) TSS").font(.caption).foregroundColor(.gray).monospacedDigit()
+                    }
+                }
+                Spacer(minLength: 0)
+                if missed { Image(systemName: "exclamationmark.circle.fill").foregroundColor(.red) }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color(white: 0.17)))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(missed ? Color.red.opacity(0.6) : Color(white: 0.28)))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func agendaRide(_ r: RideSummary) -> some View {
+        Button { openRide = r } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(r.workoutName).font(.subheadline.bold()).lineLimit(2).multilineTextAlignment(.leading)
+                    Text("\(hoursText(r.durationSeconds)) h  ·  \(Int(r.tss.rounded())) TSS").font(.caption).foregroundColor(.gray).monospacedDigit()
+                }
+                Spacer(minLength: 0)
+                if let sc = r.score { Text("\(Int(sc.total.rounded()))").font(.subheadline.bold()).foregroundColor(.green) }
+                Image(systemName: "checkmark.circle.fill").foregroundColor(.green).font(.title3)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color(white: 0.17)))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.green.opacity(0.4)))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func weekSummary(_ days: [Date]) -> some View {
+        let (planSec, planTSS, doneSec, doneTSS) = weekStats(days)
         let weekNo = cal.component(.weekOfYear, from: days[0])
         return VStack(alignment: .leading, spacing: 6) {
             Text("Wk \(weekNo)").font(.system(size: 13, weight: .bold))
