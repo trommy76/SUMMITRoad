@@ -29,6 +29,15 @@ extension View {
 }
 
 extension View {
+    /// A sheet's fixed size on the Mac; on iOS it fills the screen and scrolls, so nothing falls off a phone.
+    func sheetFrame(width: CGFloat, height: CGFloat? = nil) -> some View {
+        #if os(macOS)
+        frame(width: width, height: height)
+        #else
+        ScrollView { self.frame(maxWidth: .infinity, alignment: .leading) }
+        #endif
+    }
+
     /// Text-field look for forms: bordered, no auto-capitals or auto-correct on iOS.
     func formField(url: Bool = false, number: Bool = false) -> some View {
         #if os(iOS)

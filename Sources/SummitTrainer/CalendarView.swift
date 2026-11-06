@@ -437,6 +437,6 @@ private struct PlannedDetail: View {
             }
         }
         .padding(24)
-        .frame(width: 560)
+        .sheetFrame(width: 560)
     }
 }

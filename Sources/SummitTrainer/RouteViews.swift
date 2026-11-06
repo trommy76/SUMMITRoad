@@ -151,6 +151,9 @@ struct RoutesSection: View {
             }
             if !importError.isEmpty { Text(importError).font(.caption).foregroundColor(.orange) }
         }
+        .onAppear {
+            if ProcessInfo.processInfo.environment["SUMMITROAD_OPEN_FIRST_ROUTE"] != nil { selected = store.routes.first }   // for screenshots
+        }
         .fileImporter(isPresented: $picking, allowedContentTypes: [UTType(filenameExtension: "gpx") ?? .xml], onCompletion: { chosen($0.map { [$0] }) })
         .sheet(item: $selected) { r in RouteDetail(route: r) { selected = nil } }
         .sheet(isPresented: Binding(get: { importURL != nil }, set: { if !$0 { importURL = nil } })) {
@@ -189,6 +192,12 @@ struct RouteDetail: View {
     @State private var endKm = 0.0
     @State private var effort = 0.65
     @State private var confirmDelete = false
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    private var isPhone: Bool { sizeClass == .compact }
+    #else
+    private let isPhone = false
+    #endif
 
     private var totalKm: Double { route.totalDistance / 1000 }
     private var ftp: Double { store.profile.ftp ?? 200 }
@@ -197,6 +206,20 @@ struct RouteDetail: View {
         RoutePhysics.estimatedSeconds(route: route, from: startKm * 1000, to: endKm * 1000, power: ftp * effort, mass: weight)
     }
     private func hm(_ s: Double) -> String { String(format: "%d:%02d", Int(s) / 3600, (Int(s) % 3600) / 60) }
+
+    private var riderStepper: some View {
+        Stepper("Rider + bike: \(Int(weight)) kg",
+                value: Binding(get: { weight }, set: { store.profile.riderWeightKg = $0 }), in: 40...200, step: 1)
+    }
+
+    private var startButton: some View {
+        Button("Start Ride") {
+            close()
+            app.startRoute(RouteRide(route: route, startM: startKm * 1000, endM: endKm * 1000, mass: weight), effort: effort)
+        }
+        .buttonStyle(.borderedProminent).controlSize(.large)
+        .disabled(endKm - startKm < 0.9)
+    }
 
     private func fit(minutes: Double) {
         endKm = RoutePhysics.endDistance(route: route, from: startKm * 1000, seconds: minutes * 60, power: ftp * effort, mass: weight) / 1000
@@ -221,11 +244,20 @@ struct RouteDetail: View {
                     .onChange(of: endKm) { v in if startKm > v - 1 { startKm = max(0, v - 1) } }
             }
 
-            HStack {
-                Text("Fit to").foregroundColor(.gray)
-                ForEach([60.0, 75.0, 90.0], id: \.self) { m in Button("\(Int(m)) min") { fit(minutes: m) } }
-                Spacer()
-                Button("Whole route") { startKm = 0; endKm = totalKm }
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    Text("Fit to").foregroundColor(.gray)
+                    ForEach([60.0, 75.0, 90.0], id: \.self) { m in Button("\(Int(m)) min") { fit(minutes: m) } }
+                    Spacer()
+                    Button("Whole route") { startKm = 0; endKm = totalKm }
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Fit to").foregroundColor(.gray)
+                        ForEach([60.0, 75.0, 90.0], id: \.self) { m in Button("\(Int(m)) min") { fit(minutes: m) } }
+                    }
+                    Button("Whole route") { startKm = 0; endKm = totalKm }
+                }
             }
 
             Picker("Effort", selection: $effort) {
@@ -234,9 +266,13 @@ struct RouteDetail: View {
                 Text("Tempo 80%").tag(0.80)
                 Text("Hard 95%").tag(0.95)
             }
+            #if os(iOS)
+            .pickerStyle(.menu)
+            #else
             .pickerStyle(.segmented)
+            #endif
 
-            HStack(spacing: 24) {
+            HStack(spacing: isPhone ? 14 : 24) {
                 VStack(alignment: .leading) {
                     Text(String(format: "%.1f km", max(0, endKm - startKm))).font(.title2.bold())
                     Text("DISTANCE").font(.caption).foregroundColor(.gray)
@@ -249,28 +285,36 @@ struct RouteDetail: View {
                     Text(hm(seconds)).font(.title2.bold()).foregroundColor((60...90).contains(minutes) ? .green : .orange)
                     Text("EST. TIME AT \(Int((ftp * effort).rounded())) W").font(.caption).foregroundColor(.gray)
                 }
-                Spacer()
-                Stepper("Rider + bike: \(Int(weight)) kg",
-                        value: Binding(get: { weight }, set: { store.profile.riderWeightKg = $0 }), in: 40...200, step: 1)
-                    .frame(width: 230)
+                if !isPhone {
+                    Spacer()
+                    riderStepper.frame(width: 230)
+                }
             }
+            if isPhone { riderStepper }
             Text("The time is an estimate from your power, the road's gradient and your weight. In the ride it comes from your actual power.")
                 .font(.caption).foregroundColor(.gray)
 
-            HStack {
-                Button("Close", action: close)
-                Button("Remove Route", role: .destructive) { confirmDelete = true }
-                Spacer()
-                Button("Start Ride") {
-                    close()
-                    app.startRoute(RouteRide(route: route, startM: startKm * 1000, endM: endKm * 1000, mass: weight), effort: effort)
+            if isPhone {
+                // thumb-friendly: Start on top, full width
+                VStack(spacing: 10) {
+                    startButton.frame(maxWidth: .infinity)
+                    HStack {
+                        Button("Close", action: close)
+                        Spacer()
+                        Button("Remove Route", role: .destructive) { confirmDelete = true }
+                    }
                 }
-                .buttonStyle(.borderedProminent).controlSize(.large)
-                .disabled(endKm - startKm < 0.9)
+            } else {
+                HStack {
+                    Button("Close", action: close)
+                    Button("Remove Route", role: .destructive) { confirmDelete = true }
+                    Spacer()
+                    startButton
+                }
             }
         }
-        .padding(24)
-        .frame(width: 680)
+        .padding(isPhone ? 16 : 24)
+        .sheetFrame(width: 680)
         .onAppear {
             startKm = 0
             endKm = totalKm

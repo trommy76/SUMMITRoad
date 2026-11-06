@@ -256,7 +256,7 @@ struct QuestionnaireView: View {
             }
         }
         .padding(24)
-        .frame(width: 640, height: 600)
+        .sheetFrame(width: 640, height: 600)
         .onAppear {
             if let p = store.plan { q = p.questionnaire; q.startDate = Date() }
             if let f = store.profile.ftp { ftpText = String(Int(f)) }

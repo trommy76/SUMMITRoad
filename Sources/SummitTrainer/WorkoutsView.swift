@@ -110,6 +110,6 @@ private struct AdhocDetail: View {
             }
         }
         .padding(24)
-        .frame(width: 640)
+        .sheetFrame(width: 640)
     }
 }
