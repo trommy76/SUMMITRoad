@@ -110,6 +110,7 @@ final class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
         trainerPeripheral = p
         wantTrainerID = d.id
         statusText = "Connecting to \(d.name)…"
+        stopScan()                       // older radios can stall a connection while still scanning
         central.connect(p, options: nil)
     }
 
@@ -119,10 +120,18 @@ final class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
         hrPeripheral = p
         wantHRID = d.id
         hrStatus = "Connecting to \(d.name)…"
+        stopScan()                       // older radios can stall a connection while still scanning
         central.connect(p, options: nil)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+            // still waiting: drop the pending request and ask again, which un-sticks some connections
             guard let self = self, self.hrPeripheral == p, self.hrName == nil else { return }
-            self.hrStatus = "No answer from \(d.name) after 15 seconds. A watch or strap sending heart rate usually accepts one connection at a time: close SummitRoad on your other phone, tablet or Mac (or switch the watch's heart-rate broadcast off and on), then press Use as HR Monitor again."
+            self.hrStatus = "Still connecting to \(d.name)… trying again."
+            self.central.cancelPeripheralConnection(p)
+            self.central.connect(p, options: nil)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
+            guard let self = self, self.hrPeripheral == p, self.hrName == nil else { return }
+            self.hrStatus = "No answer from \(d.name) after 20 seconds. A watch or strap sending heart rate usually accepts one connection at a time: close SummitRoad on your other phone, tablet or Mac (or switch the watch's heart-rate broadcast off and on), then press Use as HR Monitor again."
         }
     }
 
