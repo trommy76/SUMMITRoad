@@ -141,7 +141,7 @@ final class Updater: ObservableObject {
 #else
 import SwiftUI
 
-/// iOS builds are updated through TestFlight / the App Store, so there is nothing to check here.
+/// iOS builds are installed from Xcode, so there is nothing to check here.
 @MainActor
 final class Updater: ObservableObject {
     struct Available { let version: String; let pageURL: URL }

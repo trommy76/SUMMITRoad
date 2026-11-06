@@ -111,17 +111,16 @@ After each ride the report shows an **Athlete Levels image**: your bars, what th
 
 ## iPhone and iPad
 
-SummitRoad also builds as an iPad and iPhone app from the same code (`project.yml`, generated with `brew install xcodegen`). It talks to the trainer over Bluetooth like the Mac app and keeps the screen awake while you ride. It has no in-app updater (TestFlight updates it), no Strava link (use **Share .FIT** on a ride instead), and the iPhone layout is a tab bar.
+SummitRoad also builds as an iPad and iPhone app from the same code. It talks to the trainer over Bluetooth like the Mac app and keeps the screen awake while you ride. It has no in-app updater, no Strava link (use **Share .FIT** on a ride instead), and the iPhone layout is a tab bar with a vertical calendar. There is no App Store version: you build it yourself with Xcode, which is free.
 
-Getting it onto your devices with TestFlight, one-time setup:
+Putting it on your own iPhone or iPad (you need a Mac with Xcode and a free Apple ID; no paid developer account):
 
-1. Join the Apple Developer Program (developer.apple.com/programs, $99 USD/year) and note your **Team ID** (Membership details).
-2. In Xcode > Settings > Accounts, sign in with that Apple ID.
-3. At appstoreconnect.apple.com > Apps > **+** > New App: platform iOS, name *SummitRoad*, bundle ID `com.trommy76.summitroad` (register it under Certificates, Identifiers & Profiles first, or change `PRODUCT_BUNDLE_IDENTIFIER` in `project.yml`), any SKU.
-4. Run `TEAM_ID=YOURTEAMID ./ios_testflight.sh`. It archives, signs and uploads a build.
-5. Once Apple finishes processing (5 to 15 minutes), open the app in App Store Connect > TestFlight, add yourself as an internal tester, then install **TestFlight** from the App Store on your iPad and accept the invitation.
+1. Open `SummitRoad.xcodeproj` (run `brew install xcodegen && xcodegen generate` first if it is missing) and choose the **SummitRoad** scheme.
+2. Select the project > **SummitRoad** target > **Signing & Capabilities**, tick *Automatically manage signing* and pick your Apple ID as the **Team** (add it under Xcode > Settings > Accounts). Xcode needs a bundle ID that is unique to you, so change `com.trommy76.summitroad` to something of your own (also in `project.yml`).
+3. On the device turn on **Settings > Privacy & Security > Developer Mode** (it restarts the device), then plug it into the Mac and tap *Trust*.
+4. Pick the device as the run destination and press Run. The first time, open **Settings > General > VPN & Device Management**, tap your Apple ID under *Developer App* and **Trust** it, then open the app.
 
-Each later release is just step 4 again; builds expire after 90 days.
+A free Apple ID signs the app for 7 days. After that it stops opening until you press Run in Xcode again (your data stays). Xcode can also install wirelessly once the device has been connected by cable (Window > Devices and Simulators > *Connect via network*).
 
 To link the app to your home server without typing, open the server website > Settings > **Connect an app** and scan the QR code with the iPhone or iPad camera.
 
