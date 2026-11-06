@@ -42,6 +42,7 @@
 		16324B51ED511E59447DD690 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
 		1705F1596D8A528D1FBB0441 /* RouteViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteViews.swift; sourceTree = "<group>"; };
 		198AEEDDC610113CE7359674 /* Scoring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scoring.swift; sourceTree = "<group>"; };
+		44A4FD00A347C4A033E78D18 /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
 		56582B192332A5F258137D77 /* Sync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sync.swift; sourceTree = "<group>"; };
 		5D3358CB5B0C7C63A43F873E /* Backgrounds */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Backgrounds; path = Resources/Backgrounds; sourceTree = SOURCE_ROOT; };
 		5E464190C1418512A5A8474B /* RideView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RideView.swift; sourceTree = "<group>"; };
@@ -138,6 +139,7 @@
 			isa = PBXGroup;
 			children = (
 				053D8F6272E493AE2ACF916F /* Assets.xcassets */,
+				44A4FD00A347C4A033E78D18 /* Signing.xcconfig */,
 			);
 			path = ios;
 			sourceTree = "<group>";
@@ -151,6 +153,7 @@
 			buildPhases = (
 				A4CBC52C02F0B369462CA07D /* Sources */,
 				3038876A4F861F413059C17E /* Resources */,
+				3BF159122E1AFB8B58D95BD5 /* Set version from VERSION */,
 			);
 			buildRules = (
 			);
@@ -173,7 +176,6 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					68EA21C1A96917F99D27A9DA = {
-						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -208,6 +210,30 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		3BF159122E1AFB8B58D95BD5 /* Set version from VERSION */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/VERSION",
+				"$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)",
+			);
+			name = "Set version from VERSION";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/version.stamp",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "V=$(tr -d '[:space:]' < \"${SRCROOT}/VERSION\")\n/usr/libexec/PlistBuddy -c \"Set :CFBundleShortVersionString $V\" -c \"Set :CFBundleVersion $V\" \"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\ntouch \"${DERIVED_FILE_DIR}/version.stamp\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		A4CBC52C02F0B369462CA07D /* Sources */ = {
@@ -282,7 +308,6 @@
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = "";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -307,6 +332,7 @@
 		};
 		7FEB9519B0FF4B563C0EE8EB /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 44A4FD00A347C4A033E78D18 /* Signing.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
@@ -316,7 +342,6 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.trommy76.summitroad;
 				PRODUCT_NAME = SummitRoad;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -360,7 +385,6 @@
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -392,6 +416,7 @@
 		};
 		C5B35BC068A68B3EC2AB265D /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 44A4FD00A347C4A033E78D18 /* Signing.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
@@ -401,7 +426,6 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.trommy76.summitroad;
 				PRODUCT_NAME = SummitRoad;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";

@@ -1,0 +1,5 @@
+// Defaults for everyone. Put your own values in ios/Local.xcconfig (ignored by git), for example:
+//   DEVELOPMENT_TEAM = ABCDE12345
+//   PRODUCT_BUNDLE_IDENTIFIER = com.yourname.summitroad
+PRODUCT_BUNDLE_IDENTIFIER = com.trommy76.summitroad
+#include? "Local.xcconfig"

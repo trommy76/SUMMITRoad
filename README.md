@@ -113,10 +113,31 @@ After each ride the report shows an **Athlete Levels image**: your bars, what th
 
 SummitRoad also builds as an iPad and iPhone app from the same code. It talks to the trainer over Bluetooth like the Mac app and keeps the screen awake while you ride. It has no in-app updater, no Strava link (use **Share .FIT** on a ride instead), and the iPhone layout is a tab bar with a vertical calendar. There is no App Store version: you build it yourself with Xcode, which is free.
 
+<table>
+<tr>
+<td><img src="docs/screenshots/ios-phone-calendar.png" width="200" alt="iPhone calendar"></td>
+<td><img src="docs/screenshots/ios-phone-today.png" width="200" alt="iPhone Today"></td>
+<td><img src="docs/screenshots/ios-phone-route.png" width="200" alt="iPhone route"></td>
+<td><img src="docs/screenshots/ios-phone-levels.png" width="200" alt="iPhone levels"></td>
+</tr>
+</table>
+
+| ![iPad calendar](docs/screenshots/ios-ipad-calendar.png) | ![iPad workouts and routes](docs/screenshots/ios-ipad-workouts.png) |
+|---|---|
+| ![iPad Today](docs/screenshots/ios-ipad-today.png) | ![iPad levels](docs/screenshots/ios-ipad-levels.png) |
+
+
 Putting it on your own iPhone or iPad (you need a Mac with Xcode and a free Apple ID; no paid developer account):
 
 1. Open `SummitRoad.xcodeproj` (run `brew install xcodegen && xcodegen generate` first if it is missing) and choose the **SummitRoad** scheme.
-2. Select the project > **SummitRoad** target > **Signing & Capabilities**, tick *Automatically manage signing* and pick your Apple ID as the **Team** (add it under Xcode > Settings > Accounts). Xcode needs a bundle ID that is unique to you, so change `com.trommy76.summitroad` to something of your own (also in `project.yml`).
+2. Tell Xcode who you are: create `ios/Local.xcconfig` (ignored by git) containing your Team ID and a bundle ID that is unique to you, for example:
+
+   ```
+   DEVELOPMENT_TEAM = ABCDE12345
+   PRODUCT_BUNDLE_IDENTIFIER = com.yourname.summitroad
+   ```
+
+   Your Team ID is shown under Xcode > Settings > Accounts (select your Apple ID > Manage Certificates), or on developer.apple.com > Membership for a paid account. Then run `xcodegen generate`. (You can also pick the Team in Signing & Capabilities, but regenerating the project resets that.)
 3. On the device turn on **Settings > Privacy & Security > Developer Mode** (it restarts the device), then plug it into the Mac and tap *Trust*.
 4. Pick the device as the run destination and press Run. The first time, open **Settings > General > VPN & Device Management**, tap your Apple ID under *Developer App* and **Trust** it, then open the app.
 

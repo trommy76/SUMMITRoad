@@ -226,20 +226,29 @@ struct CalendarView: View {
         Button { openRide = r } label: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(r.workoutName).font(.system(size: 12, weight: .bold)).lineLimit(2)
-                HStack {
-                    VStack(alignment: .leading) {
-                        Text(hoursText(r.durationSeconds)).font(.system(size: 11)).monospacedDigit()
-                        Text("DURATION").font(.system(size: 8)).foregroundColor(.gray).lineLimit(1).minimumScaleFactor(0.6)
+                ViewThatFits(in: .horizontal) {
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(hoursText(r.durationSeconds)).font(.system(size: 11)).monospacedDigit()
+                            Text("DURATION").font(.system(size: 8)).foregroundColor(.gray).lineLimit(1)
+                        }
+                        VStack(alignment: .leading) {
+                            Text("\(Int(r.tss.rounded()))").font(.system(size: 11)).monospacedDigit()
+                            Text("TSS").font(.system(size: 8)).foregroundColor(.gray)
+                        }
+                        Spacer()
+                        if let s = r.score {
+                            Text("\(Int(s.total.rounded()))").font(.system(size: 11, weight: .bold)).foregroundColor(.green)
+                        }
+                        Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
                     }
-                    VStack(alignment: .leading) {
-                        Text("\(Int(r.tss.rounded()))").font(.system(size: 11)).monospacedDigit()
-                        Text("TSS").font(.system(size: 8)).foregroundColor(.gray)
+                    .fixedSize(horizontal: true, vertical: false)
+                    // narrow cells (iPad portrait): one short line instead of letters wrapping
+                    HStack(spacing: 4) {
+                        Text("\(hoursText(r.durationSeconds)) · \(Int(r.tss.rounded()))").font(.system(size: 10)).monospacedDigit().lineLimit(1)
+                        Spacer(minLength: 0)
+                        Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
                     }
-                    Spacer()
-                    if let s = r.score {
-                        Text("\(Int(s.total.rounded()))").font(.system(size: 11, weight: .bold)).foregroundColor(.green)
-                    }
-                    Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
                 }
             }
             .padding(6)
@@ -292,7 +301,7 @@ struct CalendarView: View {
 
     private func scrollToToday(_ proxy: ScrollViewProxy) {
         guard cal.isDate(Date(), equalTo: month, toGranularity: .month) else { return }
-        DispatchQueue.main.async { proxy.scrollTo(cal.startOfDay(for: Date()), anchor: .top) }
+        DispatchQueue.main.async { proxy.scrollTo(cal.startOfDay(for: Date()), anchor: UnitPoint(x: 0.5, y: 0.3)) }   // a little of the past stays in view
     }
 
     private func agendaWeekHeader(_ days: [Date]) -> some View {
