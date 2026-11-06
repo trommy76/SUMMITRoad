@@ -23,6 +23,7 @@ struct SummitTrainerApp: App {
                 .environmentObject(app.strava)
                 .environmentObject(app.updater)
                 .environmentObject(app.sync)
+                .onOpenURL { app.open($0) }
                 #if os(macOS)
                 .frame(minWidth: 1000, minHeight: 720)
                 #endif
@@ -74,9 +75,10 @@ extension AppTab {
 }
 
 struct MainView: View {
-    @State var tab: AppTab = .calendar
+    @State var tab: AppTab = AppTab(rawValue: ProcessInfo.processInfo.environment["SUMMITROAD_START_TAB"] ?? "") ?? .calendar
     @EnvironmentObject var updater: Updater
     @EnvironmentObject var sync: SyncClient
+    @EnvironmentObject var app: AppState
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
     #endif
@@ -97,6 +99,11 @@ struct MainView: View {
     }
 
     var body: some View {
+        layout.onChange(of: app.pendingConnect) { if $0 != nil { tab = .settings } }
+    }
+
+    @ViewBuilder
+    private var layout: some View {
         #if os(iOS)
         if sizeClass == .compact {
             // iPhone: a tab bar (the extra tabs go under "More") instead of the sidebar

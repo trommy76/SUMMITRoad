@@ -54,3 +54,7 @@ targets:
           NSAllowsLocalNetworking: true
         ITSAppUsesNonExemptEncryption: false
         UIFileSharingEnabled: false
+        CFBundleURLTypes:
+          - CFBundleURLName: com.trommy76.summitroad.connect
+            CFBundleURLSchemes:
+              - summitroad

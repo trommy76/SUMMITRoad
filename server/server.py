@@ -1041,6 +1041,11 @@ nav{display:flex;gap:4px;margin-left:12px}nav a{color:var(--mut);text-decoration
 <div class="muted" style="margin-bottom:10px">The SummitRoad Mac app signs in with one of these (Settings &gt; Home Server &gt; Update Login). While two-factor is on, your normal password no longer works in the app. You can make one per computer and revoke it any time.</div>
 <div class="scroll"><table><thead><tr><th>Name</th><th>Created</th><th>Last used</th><th></th></tr></thead><tbody id="appRows"></tbody></table></div>
 <form class="row" onsubmit="makeAppPw();return false" autocomplete="off" style="margin-top:10px"><input type="text" id="appName" value="Mac app" placeholder="Name, e.g. Studio MacBook" autocomplete="off"><button type="submit">Create app password</button></form><div id="appMsg" class="msg"></div></div>
+<div class="card" id="connectCard" style="margin-top:20px"><h2>Connect an app</h2>
+<div class="muted" style="margin-bottom:10px">Link the SummitRoad iPhone or iPad app (or another Mac) to this server without typing anything: press the button, then point the device&rsquo;s camera at the QR code and tap the banner that appears. This makes a new app password for that device (you can revoke it above any time).</div>
+<form class="row" onsubmit="makeConnect();return false" autocomplete="off"><input type="text" id="connAddr" placeholder="Address the device will use" autocomplete="off"><input type="text" id="connName" value="iPad app" placeholder="Name, e.g. iPad" autocomplete="off"><button type="submit">Show QR code</button></form>
+<div class="muted" style="margin-top:6px">The address is how your phone reaches this server, for example <code>http://192.168.1.20:8787</code> at home. It starts as the address you are using now; change it if that is <code>localhost</code>.</div>
+<div id="connMsg" class="msg"></div><div id="connOut"></div></div>
 <div class="card" id="usersCard" style="display:none;margin-top:20px"><h2>Users (admin)</h2>
 <div class="scroll"><table><thead><tr><th>User</th><th>Role</th><th>Rides</th><th>2FA</th><th></th></tr></thead><tbody id="users"></tbody></table></div>
 <h2 style="margin-top:16px">Add a user</h2>
@@ -1126,6 +1131,16 @@ async function makeAppPw(){
   try{const r=await call('POST','/api/apppasswords',{name:$('appName').value});
     $('appMsg').className='msg';$('appMsg').innerHTML='App password for &ldquo;'+esc(r.name)+'&rdquo; (shown only once):<div class="secret"><code>'+esc(r.password)+'</code> <button type="button" data-t="'+esc(r.password)+'" onclick="copyText(this.dataset.t,this)">Copy</button></div>';loadApps()}
   catch(e){say('appMsg',e.message)}}
+async function makeConnect(){
+  try{const addr=($('connAddr').value||location.origin).trim();
+    const r=await call('POST','/api/apppasswords',{name:$('connName').value||'App'});
+    const link='summitroad://connect?server='+encodeURIComponent(addr)+'&user='+encodeURIComponent(me)+'&password='+encodeURIComponent(r.password);
+    const q=qrcode(0,'M');q.addData(link);q.make();
+    $('connMsg').className='msg';$('connMsg').textContent='';
+    $('connOut').innerHTML='<div style="background:#fff;padding:12px;display:inline-block;border-radius:8px;margin-top:10px">'+q.createSvgTag(5,0)+'</div>'
+      +'<div class="muted" style="margin-top:8px">This code contains a login for &ldquo;'+esc(r.name)+'&rdquo; and is shown only once. Don&rsquo;t share a screenshot of it. If it&rsquo;s exposed, revoke the app password above.</div>';
+    loadApps()}
+  catch(e){say('connMsg',e.message)}}
 async function revokeApp(id){
   if(!confirm('Revoke this app password? Anything using it (like the Mac app) will stop signing in.'))return;
   try{await call('DELETE','/api/apppasswords/'+id);say('appMsg','Revoked.',true);loadApps()}catch(e){say('appMsg',e.message)}}
@@ -1188,7 +1203,7 @@ function route(){const h=location.hash,pg=h==='#settings'?'settings':h==='#plan'
 window.addEventListener('hashchange',route);route();
 async function load(){
   const [rides,ftp,meInfo]=await Promise.all([api('/api/rides'),api('/api/ftp'),api('/api/ping')]);
-  me=meInfo.user;if(meInfo.mfaOverride){$('banner').style.display='block';$('banner').innerHTML='&#9888; Two-factor sign-in is switched <b>off</b> by the server setting <code>SUMMITROAD_DISABLE_MFA</code>. Anyone with a password can sign in. Remove the setting from docker-compose and redeploy to turn two-factor back on.'}$('ver').textContent='server v'+meInfo.server;$('who').textContent='signed in as '+me+(meInfo.admin?' (admin)':'');if(meInfo.admin)loadUsers();initLog(meInfo.admin);
+  me=meInfo.user;if(meInfo.mfaOverride){$('banner').style.display='block';$('banner').innerHTML='&#9888; Two-factor sign-in is switched <b>off</b> by the server setting <code>SUMMITROAD_DISABLE_MFA</code>. Anyone with a password can sign in. Remove the setting from docker-compose and redeploy to turn two-factor back on.'}$('ver').textContent='server v'+meInfo.server;$('connAddr').value=location.origin;$('who').textContent='signed in as '+me+(meInfo.admin?' (admin)':'');if(meInfo.admin)loadUsers();initLog(meInfo.admin);
   const live=rides.filter(r=>!r.deleted);
   const tot=live.reduce((a,r)=>({s:a.s+r.durationSeconds,t:a.t+r.tss,k:a.k+r.kj}),{s:0,t:0,k:0});
   const cur=ftp.length?ftp[ftp.length-1].ftp:null;

@@ -28,6 +28,29 @@ extension View {
     }
 }
 
+extension View {
+    /// Text-field look for forms: bordered, no auto-capitals or auto-correct on iOS.
+    func formField(url: Bool = false, number: Bool = false) -> some View {
+        #if os(iOS)
+        textFieldStyle(.roundedBorder)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .keyboardType(url ? .URL : (number ? .numberPad : .default))
+        #else
+        self
+        #endif
+    }
+
+    /// Visible button shapes on iOS (plain blue text is easy to miss on a touch screen); default on the Mac.
+    func actionButtons() -> some View {
+        #if os(iOS)
+        buttonStyle(.bordered)
+        #else
+        self
+        #endif
+    }
+}
+
 enum Platform {
     static var deviceName: String {
         #if os(macOS)

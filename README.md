@@ -123,6 +123,8 @@ Getting it onto your devices with TestFlight, one-time setup:
 
 Each later release is just step 4 again; builds expire after 90 days.
 
+To link the app to your home server without typing, open the server website > Settings > **Connect an app** and scan the QR code with the iPhone or iPad camera.
+
 ## Importing rides
 
 On the Rides tab, **Import rides…** brings in rides recorded elsewhere (a bike computer, Zwift, Strava's export). It reads `.fit`, `.tcx` and gzipped files such as `.fit.gz`. Rides with power count towards your athlete levels and training load but have no workout score. Rides without a power meter are imported with power estimated from speed (or GPS position), elevation and your rider weight in Settings. That estimate ignores wind and drafting, so it is rough: those rides are marked as estimated and stay out of your levels unless you turn on *Count rides with estimated power* in Settings. Rides already in your history are skipped, and imported rides are not uploaded to Strava.

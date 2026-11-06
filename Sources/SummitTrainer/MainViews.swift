@@ -757,6 +757,9 @@ struct SettingsView: View {
     @EnvironmentObject var strava: StravaClient
     @EnvironmentObject var updater: Updater
     @EnvironmentObject var sync: SyncClient
+    @EnvironmentObject var app: AppState
+    @State private var incoming: ConnectLink?
+    @State private var showIncoming = false
     @State private var syncURL = ""
     @State private var syncUser = ""
     @State private var syncPass = ""
@@ -775,7 +778,7 @@ struct SettingsView: View {
                         Text("Athlete").font(.headline)
                         HStack {
                             Text("FTP (W)")
-                            TextField("e.g. 210", text: $ftpText).frame(width: 90)
+                            TextField("e.g. 210", text: $ftpText).formField(number: true).frame(width: 90)
                             Button("Save FTP") {
                                 if let v = Double(ftpText), v > 50, v < 600 { store.setFTP(v, method: "Manual") }
                             }
@@ -823,23 +826,27 @@ struct SettingsView: View {
                 Card {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Home Server (optional)").font(.headline)
-                        Text("Keep your rides, FTP history, training plan, settings and .FIT files on your own SummitRoad server (Docker, on your home network) so other machines see them and you can browse them in a browser. Leave this blank to keep everything only on this Mac. If you turn on two-factor sign-in on the server, create an app password in the website's Settings and enter that here as the password.")
+                        Text("Keep your rides, FTP history, training plan, settings and .FIT files on your own SummitRoad server (Docker, on your home network) so other machines see them and you can browse them in a browser. Leave this blank to keep everything only on this device. If you turn on two-factor sign-in on the server, create an app password in the website's Settings and enter that here as the password.")
                             .font(.callout).foregroundColor(.gray)
+                        #if os(macOS)
                         HStack {
                             TextField("Server address, e.g. 192.168.1.20:8787", text: $syncURL).frame(width: 280)
                             TextField("Username", text: $syncUser).frame(width: 130)
                             SecureField("Password", text: $syncPass).frame(width: 150)
                         }
+                        #else
+                        VStack(spacing: 10) {
+                            TextField("Server address, e.g. 192.168.1.20:8787", text: $syncURL).formField(url: true)
+                            TextField("Username", text: $syncUser).formField()
+                            SecureField("Password", text: $syncPass).formField()
+                        }
+                        #endif
+                        #if os(iOS)
+                        Text("Easier: on the server's website open Settings > Connect an app, then scan its QR code with your camera.")
+                            .font(.caption).foregroundColor(.gray)
+                        #endif
                         HStack {
-                            Button(sync.configured ? "Update Login" : "Connect") {
-                                Task {
-                                    if await sync.connect(urlString: syncURL, user: syncUser, password: syncPass) {
-                                        syncPass = ""
-                                        if store.profile.syncUploadOK == nil { askUpload = true }
-                                        else { await sync.syncAll(upload: store.profile.syncUploadOK == true, download: true) }
-                                    }
-                                }
-                            }
+                            Button(sync.configured ? "Update Login" : "Connect") { connectToServer() }
                             .disabled(sync.busy)
                             if sync.configured {
                                 Button("Sync Now") {
@@ -899,7 +906,11 @@ struct SettingsView: View {
                 Card {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Data").font(.headline)
+                        #if os(macOS)
                         Text("Rides, plan and .FIT files are stored in your Application Support folder.").foregroundColor(.gray)
+                        #else
+                        Text("Rides, plan and .FIT files are stored on this device. Turn on the home server above to keep a copy elsewhere.").foregroundColor(.gray)
+                        #endif
                         #if os(macOS)
                         Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([store.dir]) }
                         Button("Open .FIT Folder") { NSWorkspace.shared.open(store.dir.appendingPathComponent("fit")) }
@@ -929,10 +940,39 @@ struct SettingsView: View {
         } message: {
             Text("Planned workouts are removed. Your ride history and FTP are kept.")
         }
+        .actionButtons()
         .onAppear {
             if let f = store.profile.ftp { ftpText = String(Int(f)) }
             syncURL = store.profile.syncURL ?? ""
             syncUser = store.profile.syncUser ?? ""
+            takeIncoming()
+        }
+        .onChange(of: app.pendingConnect) { _ in takeIncoming() }
+        .alert("Connect to your home server?", isPresented: $showIncoming, presenting: incoming) { link in
+            Button("Cancel", role: .cancel) {}
+            Button("Connect") {
+                syncURL = link.server; syncUser = link.user; syncPass = link.password
+                connectToServer()
+            }
+        } message: { link in
+            Text("\(link.server) as \(link.user)")
+        }
+    }
+
+    private func takeIncoming() {
+        guard let link = app.pendingConnect else { return }
+        app.pendingConnect = nil
+        incoming = link
+        showIncoming = true
+    }
+
+    private func connectToServer() {
+        Task {
+            if await sync.connect(urlString: syncURL, user: syncUser, password: syncPass) {
+                syncPass = ""
+                if store.profile.syncUploadOK == nil { askUpload = true }
+                else { await sync.syncAll(upload: store.profile.syncUploadOK == true, download: true) }
+            }
         }
     }
 }

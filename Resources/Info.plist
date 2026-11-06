@@ -15,6 +15,11 @@
     <key>NSHighResolutionCapable</key><true/>
     <key>NSAppTransportSecurity</key>
     <dict><key>NSAllowsLocalNetworking</key><true/></dict>
+    <key>CFBundleURLTypes</key>
+    <array><dict>
+        <key>CFBundleURLName</key><string>com.example.SummitTrainer.connect</string>
+        <key>CFBundleURLSchemes</key><array><string>summitroad</string></array>
+    </dict></array>
     <key>NSBluetoothAlwaysUsageDescription</key>
     <string>SummitRoad connects to your smart trainer and heart-rate monitor over Bluetooth.</string>
 </dict>

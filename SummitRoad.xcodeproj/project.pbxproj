@@ -32,6 +32,7 @@
 		E2C2CB6F8BCE7DC3B61F581E /* WorkoutsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2531587E4BDCF750AC5398A /* WorkoutsView.swift */; };
 		EF8C758A9A54FBA5E75EBF37 /* Bluetooth.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B33AEBB33EC9E69B85A99D /* Bluetooth.swift */; };
 		F378635504103AB711C88E46 /* Sync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56582B192332A5F258137D77 /* Sync.swift */; };
+		F919CA7CD1BBF8DAF5E287CF /* Connect.swift in Sources */ = {isa = PBXBuildFile; fileRef = B95743B53116F49B86A6C71F /* Connect.swift */; };
 		FA2255BCB031D4F45F3A1BF8 /* RideSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 639EBFC9BC1575E65B9CB1E0 /* RideSession.swift */; };
 /* End PBXBuildFile section */
 
@@ -53,6 +54,7 @@
 		A30885ECE16FECDC0EB5FFE1 /* Platform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Platform.swift; sourceTree = "<group>"; };
 		A9B33AEBB33EC9E69B85A99D /* Bluetooth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Bluetooth.swift; sourceTree = "<group>"; };
 		ACDEAE5492C84C622A61D06D /* Plan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Plan.swift; sourceTree = "<group>"; };
+		B95743B53116F49B86A6C71F /* Connect.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Connect.swift; sourceTree = "<group>"; };
 		BDF103452FC4D746CE736D52 /* Route.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Route.swift; sourceTree = "<group>"; };
 		CA8B661C39CA4606D0A7AFD3 /* MainViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainViews.swift; sourceTree = "<group>"; };
 		CAC343051534CA5C93BAAB4A /* AdhocWorkouts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdhocWorkouts.swift; sourceTree = "<group>"; };
@@ -108,6 +110,7 @@
 				CFC9C7CB94A3EF8B6BFADA08 /* AppState.swift */,
 				A9B33AEBB33EC9E69B85A99D /* Bluetooth.swift */,
 				75E30542E558DD7B199F7468 /* CalendarView.swift */,
+				B95743B53116F49B86A6C71F /* Connect.swift */,
 				684163291F671E56B48A62D3 /* FIT.swift */,
 				960164EBB7D0579E2DE0B920 /* Levels.swift */,
 				FC57A4D3B87C2020ABEBFEAB /* LevelViews.swift */,
@@ -216,6 +219,7 @@
 				AA24FCA991907D174223803E /* AppState.swift in Sources */,
 				EF8C758A9A54FBA5E75EBF37 /* Bluetooth.swift in Sources */,
 				DE048AFAB8CE14D630148A0E /* CalendarView.swift in Sources */,
+				F919CA7CD1BBF8DAF5E287CF /* Connect.swift in Sources */,
 				1707391F9951620345FB5286 /* FIT.swift in Sources */,
 				C42603368218E4516C032EAD /* LevelViews.swift in Sources */,
 				52D3FFDC9B9F4B4199B22276 /* Levels.swift in Sources */,

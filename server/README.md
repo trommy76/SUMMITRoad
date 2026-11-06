@@ -35,6 +35,14 @@ After that:
 
 macOS only allows plain `http://` to local addresses: use an IP address, a `.local` name or a name without dots.
 
+## Connecting the iPhone / iPad app (QR code)
+
+On the website open **Settings > Connect an app**, check the address (it starts as the one you are browsing with; use
+the one your phone can reach, such as `http://192.168.1.20:8787`), name the device and press **Show QR code**. Point the
+phone's camera at it and tap the banner: SummitRoad opens in Settings and asks to connect. The QR code carries a new
+app password for that device (shown only once, revocable under App passwords), so don't share a screenshot of it.
+This works with or without two-factor sign-in.
+
 ## Signing in and out
 
 Browsers get a sign-in page (username, password, "keep me signed in on this device" for 30 days; otherwise the

@@ -202,6 +202,13 @@ final class AppState: ObservableObject {
     @Published var session: RideSession?
     @Published var review: RideSummary?
     @Published var uploadMessage = ""
+    /// A server connect link (from the website's QR code) waiting for the user to confirm in Settings.
+    @Published var pendingConnect: ConnectLink?
+
+    func open(_ url: URL) {
+        guard session == nil, let link = ConnectLink(url: url) else { return }
+        pendingConnect = link
+    }
 
     init() {
         ble.onRememberTrainer = { [weak self] id in self?.store.profile.trainerID = id.uuidString }
