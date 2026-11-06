@@ -50,6 +50,7 @@ final class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
     @Published var liveCadence: Int?
     @Published var liveHR: Int?
     @Published var statusText = ""
+    @Published var hrStatus = ""          // what the heart-rate connection is doing, shown on the Devices screen
 
     var onRememberTrainer: ((UUID) -> Void)?
     var onRememberHR: ((UUID) -> Void)?
@@ -117,7 +118,12 @@ final class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
         if let old = hrPeripheral, old != p { central.cancelPeripheralConnection(old) }
         hrPeripheral = p
         wantHRID = d.id
+        hrStatus = "Connecting to \(d.name)…"
         central.connect(p, options: nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            guard let self = self, self.hrPeripheral == p, self.hrName == nil else { return }
+            self.hrStatus = "No answer from \(d.name) after 15 seconds. A watch or strap sending heart rate usually accepts one connection at a time: close SummitRoad on your other phone, tablet or Mac (or switch the watch's heart-rate broadcast off and on), then press Use as HR Monitor again."
+        }
     }
 
     func disconnectTrainer() {
@@ -133,6 +139,7 @@ final class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
         if let p = hrPeripheral { central.cancelPeripheralConnection(p) }
         hrPeripheral = nil
         hrName = nil
+        hrStatus = ""
     }
 
     /// Remember previously used devices and reconnect to them. Safe to call before Bluetooth is ready:
@@ -264,6 +271,7 @@ final class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
         }
         if p == hrPeripheral {
             hrName = p.name ?? "HR monitor"
+            hrStatus = "Connected to \(hrName ?? "the monitor"). Waiting for heart rate…"
             onRememberHR?(p.identifier)
             p.discoverServices([BLEUUID.hrs])
         }
@@ -271,6 +279,7 @@ final class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
 
     func centralManager(_ c: CBCentralManager, didFailToConnect p: CBPeripheral, error: Error?) {
         statusText = "Connection failed: \(error?.localizedDescription ?? "unknown")"
+        if p == hrPeripheral { hrStatus = "Could not connect to the heart-rate monitor: \(error?.localizedDescription ?? "unknown"). Retrying…" }
         if p == trainerPeripheral && wantTrainerID == p.identifier || p == hrPeripheral && wantHRID == p.identifier {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                 guard let self = self else { return }
@@ -289,7 +298,10 @@ final class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
             if wantTrainerID == p.identifier { central.connect(p, options: nil) } else { trainerName = nil }
         }
         if p == hrPeripheral {
-            if wantHRID == p.identifier { central.connect(p, options: nil) } else { hrName = nil }
+            if wantHRID == p.identifier {
+                hrStatus = "Heart-rate monitor disconnected. Reconnecting…"
+                central.connect(p, options: nil)
+            } else { hrName = nil }
         }
     }
 
@@ -306,7 +318,9 @@ final class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
             }
         }
         if p == hrPeripheral {
-            for s in services where s.uuid == BLEUUID.hrs {
+            let hrServices = services.filter { $0.uuid == BLEUUID.hrs }
+            if hrServices.isEmpty { hrStatus = "Connected, but this device doesn't offer a heart-rate service. On a watch, start its heart-rate broadcast first." }
+            for s in hrServices {
                 p.discoverCharacteristics([BLEUUID.hrMeasurement], for: s)
             }
         }
@@ -430,7 +444,7 @@ final class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CB
         } else if b.count >= 3 {
             hr = Int(b[1]) | (Int(b[2]) << 8)
         } else { return }
-        if hr > 0 { strapHR = hr; strapHRAt = Date() }
+        if hr > 0 { strapHR = hr; strapHRAt = Date(); if hrStatus != "" { hrStatus = "" } }
     }
 
     // MARK: Live display & demo

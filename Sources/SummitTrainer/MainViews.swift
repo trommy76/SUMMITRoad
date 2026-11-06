@@ -708,6 +708,7 @@ struct DevicesView: View {
                             Spacer()
                             if ble.hrName != nil { Button("Disconnect") { ble.disconnectHR() } }
                         }
+                        if !ble.hrStatus.isEmpty { Text(ble.hrStatus).font(.caption).foregroundColor(.orange) }
                         if !ble.statusText.isEmpty { Text(ble.statusText).font(.caption).foregroundColor(.gray) }
                         HStack(spacing: 30) {
                             Text("Power: \(ble.livePower.map { "\($0) W" } ?? "--")")
