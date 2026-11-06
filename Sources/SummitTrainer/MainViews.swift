@@ -943,8 +943,9 @@ struct SettingsView: View {
         .actionButtons()
         .onAppear {
             if let f = store.profile.ftp { ftpText = String(Int(f)) }
-            syncURL = store.profile.syncURL ?? ""
-            syncUser = store.profile.syncUser ?? ""
+            // Only fill blanks: coming back to this screen must not wipe what a QR link or the user just entered.
+            if syncURL.isEmpty { syncURL = store.profile.syncURL ?? "" }
+            if syncUser.isEmpty { syncUser = store.profile.syncUser ?? "" }
             takeIncoming()
         }
         .onChange(of: app.pendingConnect) { _ in takeIncoming() }
