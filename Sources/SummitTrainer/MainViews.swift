@@ -759,6 +759,7 @@ struct SettingsView: View {
     @EnvironmentObject var sync: SyncClient
     @EnvironmentObject var app: AppState
     @State private var incoming: ConnectLink?
+    @State private var scanning = false
     @State private var showIncoming = false
     @State private var syncURL = ""
     @State private var syncUser = ""
@@ -828,6 +829,10 @@ struct SettingsView: View {
                         Text("Home Server (optional)").font(.headline)
                         Text("Keep your rides, FTP history, training plan, settings and .FIT files on your own SummitRoad server (Docker, on your home network) so other machines see them and you can browse them in a browser. Leave this blank to keep everything only on this device. If you turn on two-factor sign-in on the server, create an app password in the website's Settings and enter that here as the password.")
                             .font(.callout).foregroundColor(.gray)
+                        #if os(iOS)
+                        Button { scanning = true } label: { Label("Scan QR code", systemImage: "qrcode.viewfinder") }
+                            .buttonStyle(.borderedProminent)
+                        #endif
                         #if os(macOS)
                         HStack {
                             TextField("Server address, e.g. 192.168.1.20:8787", text: $syncURL).frame(width: 280)
@@ -842,7 +847,7 @@ struct SettingsView: View {
                         }
                         #endif
                         #if os(iOS)
-                        Text("Easier: on the server's website open Settings > Connect an app, then scan its QR code with your camera.")
+                        Text("Easier: on the server's website open Settings > Connect an app, then scan its QR code here.")
                             .font(.caption).foregroundColor(.gray)
                         #endif
                         HStack {
@@ -947,8 +952,19 @@ struct SettingsView: View {
             if syncURL.isEmpty { syncURL = store.profile.syncURL ?? "" }
             if syncUser.isEmpty { syncUser = store.profile.syncUser ?? "" }
             takeIncoming()
+            #if os(iOS)
+            if ProcessInfo.processInfo.environment["SUMMITROAD_OPEN_SCANNER"] != nil { scanning = true }   // for screenshots
+            #endif
         }
         .onChange(of: app.pendingConnect) { _ in takeIncoming() }
+        #if os(iOS)
+        .fullScreenCover(isPresented: $scanning) {
+            QRScanSheet { link in
+                // let the camera close first, then ask for confirmation
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { app.pendingConnect = link }
+            }
+        }
+        #endif
         .alert("Connect to your home server?", isPresented: $showIncoming, presenting: incoming) { link in
             Button("Cancel", role: .cancel) {}
             Button("Connect") {

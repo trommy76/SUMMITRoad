@@ -19,6 +19,7 @@
 		784462475C72900FE1E21BA1 /* Plan.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACDEAE5492C84C622A61D06D /* Plan.swift */; };
 		88A3A48E4627551D625A38AE /* Updater.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00B43D0C23597FC627ED915F /* Updater.swift */; };
 		918FC41855311BCABFC16B9E /* Scoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = 198AEEDDC610113CE7359674 /* Scoring.swift */; };
+		97A374370C732E6E8CAE2C76 /* QRScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 117B52E0A59A0D00C6678436 /* QRScanner.swift */; };
 		9F0C15F4C1F45D5E8BA58BFA /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30885ECE16FECDC0EB5FFE1 /* Platform.swift */; };
 		AA24FCA991907D174223803E /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFC9C7CB94A3EF8B6BFADA08 /* AppState.swift */; };
 		AAF04B69CBA7DC52F021F08D /* WorkoutLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83639CB8108EE677F6801B2C /* WorkoutLibrary.swift */; };
@@ -39,6 +40,7 @@
 /* Begin PBXFileReference section */
 		00B43D0C23597FC627ED915F /* Updater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Updater.swift; sourceTree = "<group>"; };
 		053D8F6272E493AE2ACF916F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		117B52E0A59A0D00C6678436 /* QRScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScanner.swift; sourceTree = "<group>"; };
 		16324B51ED511E59447DD690 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
 		1705F1596D8A528D1FBB0441 /* RouteViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteViews.swift; sourceTree = "<group>"; };
 		198AEEDDC610113CE7359674 /* Scoring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scoring.swift; sourceTree = "<group>"; };
@@ -120,6 +122,7 @@
 				ACDEAE5492C84C622A61D06D /* Plan.swift */,
 				A30885ECE16FECDC0EB5FFE1 /* Platform.swift */,
 				CE19C3C715FAA3E9FE210E38 /* Postpone.swift */,
+				117B52E0A59A0D00C6678436 /* QRScanner.swift */,
 				F13C14B0600A5B6652F0855D /* RideImport.swift */,
 				639EBFC9BC1575E65B9CB1E0 /* RideSession.swift */,
 				5E464190C1418512A5A8474B /* RideView.swift */,
@@ -254,6 +257,7 @@
 				784462475C72900FE1E21BA1 /* Plan.swift in Sources */,
 				9F0C15F4C1F45D5E8BA58BFA /* Platform.swift in Sources */,
 				0206B5B6E45AB82D0B957953 /* Postpone.swift in Sources */,
+				97A374370C732E6E8CAE2C76 /* QRScanner.swift in Sources */,
 				B843D680390B3AB4552FDB39 /* RideImport.swift in Sources */,
 				FA2255BCB031D4F45F3A1BF8 /* RideSession.swift in Sources */,
 				B98C59148EF0CC8B824C6075 /* RideView.swift in Sources */,

@@ -61,6 +61,7 @@ targets:
         UIBackgroundModes:
           - bluetooth-central
         NSBluetoothAlwaysUsageDescription: SummitRoad connects to your smart trainer and heart-rate monitor over Bluetooth.
+        NSCameraUsageDescription: SummitRoad uses the camera only to scan the QR code that connects the app to your home server.
         NSLocalNetworkUsageDescription: SummitRoad syncs your rides and plan with your own home server on your local network.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true

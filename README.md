@@ -143,7 +143,7 @@ Putting it on your own iPhone or iPad (you need a Mac with Xcode and a free Appl
 
 A free Apple ID signs the app for 7 days. After that it stops opening until you press Run in Xcode again (your data stays). Xcode can also install wirelessly once the device has been connected by cable (Window > Devices and Simulators > *Connect via network*).
 
-To link the app to your home server without typing, open the server website > Settings > **Connect an app** and scan the QR code with the iPhone or iPad camera.
+To link the app to your home server without typing, open the server website > Settings > **Connect an app**, then in the app go to Settings > Home Server > **Scan QR code** (the iPhone or iPad camera app also works: tap the banner it shows).
 
 ## Importing rides
 
