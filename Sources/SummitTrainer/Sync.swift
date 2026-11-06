@@ -1,5 +1,5 @@
 import Foundation
-import AppKit
+import SwiftUI
 
 /// Optional sync with a SummitRoad home server (see /server). Rides, .FIT files and FTP history are kept per user.
 /// Rides never change once saved, so syncing is "add whatever the other side is missing", plus delete markers.
@@ -176,7 +176,7 @@ final class SyncClient: ObservableObject {
                 await self?.backgroundPull(minGap: 0)
             }
         }
-        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+        NotificationCenter.default.addObserver(forName: Platform.didBecomeActive, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in await self?.backgroundPull(minGap: 60) }
         }
     }
@@ -311,7 +311,7 @@ final class SyncClient: ObservableObject {
     private struct PutReply: Decodable { let rev: Int? }
     private enum PutResult { case applied(Int), conflict }
 
-    private var deviceName: String { Host.current().localizedName ?? ProcessInfo.processInfo.hostName }
+    private var deviceName: String { Platform.deviceName }
 
     private func fetchDoc<T: Decodable>(_ name: String, as: T.Type) async throws -> DocIn<T>? {
         let (d, code) = try await send("GET", "api/docs/\(name)")

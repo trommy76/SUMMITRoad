@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+#endif
 
 private let levelRed = Color(red: 0.86, green: 0.15, blue: 0.10)
 
@@ -12,7 +14,7 @@ struct LevelCardView: View {
     let ride: RideSummary
     let before: AthleteLevels
     let after: AthleteLevels
-    let background: NSImage?
+    let background: PlatformImage?
 
     private let barX = 620.0, barW = 1180.0
 
@@ -20,7 +22,7 @@ struct LevelCardView: View {
         ZStack {
             Color.black
             if let bg = background {
-                Image(nsImage: bg).resizable().scaledToFill()
+                Image(platform: bg).resizable().scaledToFill()
                     .frame(width: Self.size.width, height: Self.size.height).clipped()
                     .saturation(0).opacity(0.38)
             }
@@ -145,21 +147,18 @@ enum LevelCard {
     }
 
     /// The same ride always gets the same photo.
-    static func background(for ride: RideSummary, userDir: URL) -> NSImage? {
+    static func background(for ride: RideSummary, userDir: URL) -> PlatformImage? {
         let urls = backgroundURLs(userDir: userDir)
         guard !urls.isEmpty else { return nil }
         let pick = Int(ride.id.uuid.0) % urls.count
-        return NSImage(contentsOf: urls[pick])
+        return Platform.image(contentsOf: urls[pick])
     }
 
     @MainActor
     static func png(ride: RideSummary, rides: [RideSummary], ftp: Double, userDir: URL) -> Data? {
         let c = Levels.change(for: ride, in: rides, ftp: ftp)
         let view = LevelCardView(ride: ride, before: c.before, after: c.after, background: background(for: ride, userDir: userDir))
-        let r = ImageRenderer(content: view)
-        r.scale = 1
-        guard let tiff = r.nsImage?.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return nil }
-        return rep.representation(using: .png, properties: [:])
+        return Platform.png(view)
     }
 }
 
@@ -177,7 +176,7 @@ extension Store {
 struct LevelCardSection: View {
     let ride: RideSummary
     @EnvironmentObject var store: Store
-    @State private var image: NSImage?
+    @State private var image: PlatformImage?
 
     var body: some View {
         if ride.samples.count >= 60 {
@@ -185,14 +184,16 @@ struct LevelCardSection: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Athlete Levels").font(.title2.bold())
                     if let image {
-                        Image(nsImage: image).resizable().scaledToFit().cornerRadius(8)
+                        Image(platform: image).resizable().scaledToFit().cornerRadius(8)
                         HStack {
+                            #if os(macOS)
                             Button("Save Image…") { save() }
-                            Button("Copy") {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.writeObjects([image])
-                            }
+                            Button("Copy") { Platform.copy(image) }
                             Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([store.cardURL(for: ride)]) }
+                            #else
+                            ShareLink(item: store.cardURL(for: ride)) { Label("Share Image", systemImage: "square.and.arrow.up") }
+                            Button("Copy") { Platform.copy(image) }
+                            #endif
                             Spacer()
                             Text("Saved with this ride").font(.caption).foregroundColor(.gray)
                         }
@@ -213,9 +214,10 @@ struct LevelCardSection: View {
         let url = store.cardURL(for: ride)
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: url, options: .atomic)
-        image = NSImage(data: data)
+        image = Platform.image(data: data)
     }
 
+    #if os(macOS)
     private func save() {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
@@ -224,6 +226,7 @@ struct LevelCardSection: View {
             try? FileManager.default.copyItem(at: store.cardURL(for: ride), to: url)
         }
     }
+    #endif
 }
 
 // MARK: - Levels tab

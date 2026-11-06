@@ -1,5 +1,5 @@
 import Foundation
-import AppKit
+import SwiftUI
 import Network
 import Security
 
@@ -77,7 +77,7 @@ final class StravaClient: ObservableObject {
             URLQueryItem(name: "approval_prompt", value: "auto"),
             URLQueryItem(name: "scope", value: "activity:write,activity:read")
         ]
-        if let url = c.url { NSWorkspace.shared.open(url) }
+        if let url = c.url { Platform.open(url) }
     }
 
     func disconnect() {

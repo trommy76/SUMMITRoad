@@ -1,13 +1,17 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+#endif
 
 @main
 struct SummitTrainerApp: App {
     @StateObject private var app = AppState()
 
     init() {
+        #if os(macOS)
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.activate(ignoringOtherApps: true)
+        #endif
     }
 
     var body: some Scene {
@@ -19,7 +23,9 @@ struct SummitTrainerApp: App {
                 .environmentObject(app.strava)
                 .environmentObject(app.updater)
                 .environmentObject(app.sync)
+                #if os(macOS)
                 .frame(minWidth: 1000, minHeight: 720)
+                #endif
                 .preferredColorScheme(.dark)
         }
     }
@@ -31,13 +37,16 @@ struct RootView: View {
     @EnvironmentObject var app: AppState
 
     var body: some View {
-        if let s = app.session {
-            RideView(s: s)
-        } else if let r = app.review {
-            RideReportView(rideID: r.id, fallback: r, isReview: true)
-        } else {
-            MainView()
+        Group {
+            if let s = app.session {
+                RideView(s: s)
+            } else if let r = app.review {
+                RideReportView(rideID: r.id, fallback: r, isReview: true)
+            } else {
+                MainView()
+            }
         }
+        .onChange(of: app.session != nil) { Platform.keepAwake($0) }
     }
 }
 
@@ -68,8 +77,43 @@ struct MainView: View {
     @State var tab: AppTab = .calendar
     @EnvironmentObject var updater: Updater
     @EnvironmentObject var sync: SyncClient
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    #endif
+
+    @ViewBuilder
+    private func content(_ t: AppTab) -> some View {
+        switch t {
+        case .calendar: CalendarView()
+        case .today: TodayView(tab: $tab)
+        case .plan: PlanView()
+        case .workouts: WorkoutsView()
+        case .ftp: FTPTestView()
+        case .levels: LevelsView()
+        case .history: HistoryView()
+        case .devices: DevicesView()
+        case .settings: SettingsView()
+        }
+    }
 
     var body: some View {
+        #if os(iOS)
+        if sizeClass == .compact {
+            // iPhone: a tab bar (the extra tabs go under "More") instead of the sidebar
+            TabView(selection: $tab) {
+                ForEach(AppTab.mainTabs + AppTab.footerTabs) { t in
+                    content(t).tabItem { Label(t.rawValue, systemImage: t.icon) }.tag(t)
+                }
+            }
+        } else {
+            split
+        }
+        #else
+        split
+        #endif
+    }
+
+    private var split: some View {
         NavigationSplitView {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 0) {
@@ -106,17 +150,7 @@ struct MainView: View {
             .background(Color(white: 0.11))
             .navigationSplitViewColumnWidth(min: 190, ideal: 210)
         } detail: {
-            switch tab {
-            case .calendar: CalendarView()
-            case .today: TodayView(tab: $tab)
-            case .plan: PlanView()
-            case .workouts: WorkoutsView()
-            case .ftp: FTPTestView()
-            case .levels: LevelsView()
-            case .history: HistoryView()
-            case .devices: DevicesView()
-            case .settings: SettingsView()
-            }
+            content(tab)
         }
     }
 }

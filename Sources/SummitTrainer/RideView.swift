@@ -236,8 +236,8 @@ struct RideView: View {
                 }
             }
             Spacer()
-            Toggle("Voice", isOn: $s.voice).toggleStyle(.checkbox)
-            Toggle("Stats", isOn: $showStats).toggleStyle(.checkbox)
+            Toggle("Voice", isOn: $s.voice).checkboxToggle()
+            Toggle("Stats", isOn: $showStats).checkboxToggle()
             Button("End") { if s.state == .ready || s.state == .waiting { app.discardSession() } else { confirmEnd = true } }
         }
         .padding(10)

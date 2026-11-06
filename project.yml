@@ -1,0 +1,56 @@
+name: SummitRoad
+options:
+  bundleIdPrefix: com.trommy76
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: 5.9
+    MARKETING_VERSION: 1.0.37
+    CURRENT_PROJECT_VERSION: 1
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+targets:
+  SummitRoad:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources/SummitTrainer
+      - path: ios/Assets.xcassets
+      - path: Resources/Backgrounds
+        type: folder
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.trommy76.summitroad
+        PRODUCT_NAME: SummitRoad
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: ios/Info.plist
+    info:
+      path: ios/Info.plist
+      properties:
+        CFBundleDisplayName: SummitRoad
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIBackgroundModes:
+          - bluetooth-central
+        NSBluetoothAlwaysUsageDescription: SummitRoad connects to your smart trainer and heart-rate monitor over Bluetooth.
+        NSLocalNetworkUsageDescription: SummitRoad syncs your rides and plan with your own home server on your local network.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        ITSAppUsesNonExemptEncryption: false
+        UIFileSharingEnabled: false

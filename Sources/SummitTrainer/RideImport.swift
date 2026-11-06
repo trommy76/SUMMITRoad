@@ -48,22 +48,24 @@ enum RideImporter {
         return try build(points, title: (name as NSString).deletingPathExtension, ftp: ftp, mass: mass)
     }
 
+    /// Unzips a .gz file: skips the gzip header and inflates the raw deflate stream.
     private static func gunzip(_ data: Data) -> Data? {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/gunzip")
-        p.arguments = ["-c"]
-        let input = Pipe(), output = Pipe()
-        p.standardInput = input
-        p.standardOutput = output
-        p.standardError = Pipe()
-        do { try p.run() } catch { return nil }
-        DispatchQueue.global().async {
-            input.fileHandleForWriting.write(data)
-            try? input.fileHandleForWriting.close()
+        let b = [UInt8](data)
+        guard b.count > 18, b[0] == 0x1F, b[1] == 0x8B, b[2] == 8 else { return nil }
+        let flags = b[3]
+        var pos = 10
+        if flags & 0x04 != 0 {                                   // extra field
+            guard pos + 2 <= b.count else { return nil }
+            pos += 2 + Int(b[pos]) + Int(b[pos + 1]) << 8
         }
-        let out = output.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        return p.terminationStatus == 0 && !out.isEmpty ? out : nil
+        for bit: UInt8 in [0x08, 0x10] where flags & bit != 0 {  // file name, comment (zero-terminated)
+            while pos < b.count && b[pos] != 0 { pos += 1 }
+            pos += 1
+        }
+        if flags & 0x02 != 0 { pos += 2 }                        // header CRC
+        guard pos < b.count - 8 else { return nil }
+        let body = Data(b[pos..<(b.count - 8)])                  // drop the CRC32 + size trailer
+        return try? (body as NSData).decompressed(using: .zlib) as Data
     }
 
     /// Turns the file's points into the app's 1 Hz samples. A gap of more than 10 s counts as stopped (0 W).

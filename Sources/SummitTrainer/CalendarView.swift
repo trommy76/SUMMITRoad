@@ -33,6 +33,12 @@ struct CalendarView: View {
     @EnvironmentObject var store: Store
     @EnvironmentObject var app: AppState
     @State private var month = Date()
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    private var showSummary: Bool { sizeClass != .compact }   // no room for the week totals on an iPhone
+    #else
+    private let showSummary = true
+    #endif
     @State private var openPlanned: PlannedWorkout?
     @State private var openRide: RideSummary?
 
@@ -96,7 +102,9 @@ struct CalendarView: View {
                 Button("Close") { openRide = nil }.padding(10)
                 RideReportView(rideID: r.id, fallback: r, isReview: false)
             }
+            #if os(macOS)
             .frame(minWidth: 900, minHeight: 700)
+            #endif
         }
     }
 
@@ -121,7 +129,7 @@ struct CalendarView: View {
                 Text(d).font(.caption).foregroundColor(.gray)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 8)
             }
-            Color.clear.frame(width: 130, height: 1)
+            if showSummary { Color.clear.frame(width: 130, height: 1) }
         }
         .padding(.vertical, 8)
     }
@@ -132,7 +140,7 @@ struct CalendarView: View {
                 dayCell(day)
                 Divider()
             }
-            weekSummary(days)
+            if showSummary { weekSummary(days) }
         }
         .frame(minHeight: 170)
     }

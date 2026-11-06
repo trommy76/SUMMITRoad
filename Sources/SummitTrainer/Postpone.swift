@@ -72,7 +72,11 @@ private struct PostponeForm: View {
                 Text("This workout only").tag(false)
                 Text("This and all later workouts").tag(true)
             }
+            #if os(macOS)
             .pickerStyle(.radioGroup)
+            #else
+            .pickerStyle(.inline)
+            #endif
             .labelsHidden()
             if laterToo {
                 Text(later == 0 ? "There are no later workouts." : "\(later) later workout\(later == 1 ? "" : "s") will move by the same amount.")

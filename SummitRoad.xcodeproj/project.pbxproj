@@ -1,0 +1,431 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0206B5B6E45AB82D0B957953 /* Postpone.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE19C3C715FAA3E9FE210E38 /* Postpone.swift */; };
+		0EE9C2731180182FC19F5DFB /* RouteViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1705F1596D8A528D1FBB0441 /* RouteViews.swift */; };
+		1707391F9951620345FB5286 /* FIT.swift in Sources */ = {isa = PBXBuildFile; fileRef = 684163291F671E56B48A62D3 /* FIT.swift */; };
+		23985AEE5946DDF72DF01233 /* AdhocWorkouts.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAC343051534CA5C93BAAB4A /* AdhocWorkouts.swift */; };
+		379A41C351BC89E4D0B0F7F6 /* Backgrounds in Resources */ = {isa = PBXBuildFile; fileRef = 5D3358CB5B0C7C63A43F873E /* Backgrounds */; };
+		4D21B89546FDD56D1407992A /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16324B51ED511E59447DD690 /* App.swift */; };
+		52D3FFDC9B9F4B4199B22276 /* Levels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 960164EBB7D0579E2DE0B920 /* Levels.swift */; };
+		61D17C75A4E66A55DE59AFF5 /* Strava.swift in Sources */ = {isa = PBXBuildFile; fileRef = 840B4D6F66244AD7CB370A97 /* Strava.swift */; };
+		75A538C80208A2EFDE2AFD51 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = E101F53FF1BBA7FC35367064 /* Models.swift */; };
+		784462475C72900FE1E21BA1 /* Plan.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACDEAE5492C84C622A61D06D /* Plan.swift */; };
+		88A3A48E4627551D625A38AE /* Updater.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00B43D0C23597FC627ED915F /* Updater.swift */; };
+		918FC41855311BCABFC16B9E /* Scoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = 198AEEDDC610113CE7359674 /* Scoring.swift */; };
+		9F0C15F4C1F45D5E8BA58BFA /* Platform.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30885ECE16FECDC0EB5FFE1 /* Platform.swift */; };
+		AA24FCA991907D174223803E /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFC9C7CB94A3EF8B6BFADA08 /* AppState.swift */; };
+		AAF04B69CBA7DC52F021F08D /* WorkoutLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83639CB8108EE677F6801B2C /* WorkoutLibrary.swift */; };
+		B11726B8C37F2B5B6838ADAA /* MainViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA8B661C39CA4606D0A7AFD3 /* MainViews.swift */; };
+		B843D680390B3AB4552FDB39 /* RideImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F13C14B0600A5B6652F0855D /* RideImport.swift */; };
+		B98C59148EF0CC8B824C6075 /* RideView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E464190C1418512A5A8474B /* RideView.swift */; };
+		C42603368218E4516C032EAD /* LevelViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC57A4D3B87C2020ABEBFEAB /* LevelViews.swift */; };
+		C8903A80230A4AE2437DA1EB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 053D8F6272E493AE2ACF916F /* Assets.xcassets */; };
+		D4A3777645DDD6BAC66F935C /* Route.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDF103452FC4D746CE736D52 /* Route.swift */; };
+		DE048AFAB8CE14D630148A0E /* CalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75E30542E558DD7B199F7468 /* CalendarView.swift */; };
+		E2C2CB6F8BCE7DC3B61F581E /* WorkoutsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2531587E4BDCF750AC5398A /* WorkoutsView.swift */; };
+		EF8C758A9A54FBA5E75EBF37 /* Bluetooth.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9B33AEBB33EC9E69B85A99D /* Bluetooth.swift */; };
+		F378635504103AB711C88E46 /* Sync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56582B192332A5F258137D77 /* Sync.swift */; };
+		FA2255BCB031D4F45F3A1BF8 /* RideSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 639EBFC9BC1575E65B9CB1E0 /* RideSession.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		00B43D0C23597FC627ED915F /* Updater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Updater.swift; sourceTree = "<group>"; };
+		053D8F6272E493AE2ACF916F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		16324B51ED511E59447DD690 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
+		1705F1596D8A528D1FBB0441 /* RouteViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteViews.swift; sourceTree = "<group>"; };
+		198AEEDDC610113CE7359674 /* Scoring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scoring.swift; sourceTree = "<group>"; };
+		56582B192332A5F258137D77 /* Sync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sync.swift; sourceTree = "<group>"; };
+		5D3358CB5B0C7C63A43F873E /* Backgrounds */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Backgrounds; path = Resources/Backgrounds; sourceTree = SOURCE_ROOT; };
+		5E464190C1418512A5A8474B /* RideView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RideView.swift; sourceTree = "<group>"; };
+		639EBFC9BC1575E65B9CB1E0 /* RideSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RideSession.swift; sourceTree = "<group>"; };
+		684163291F671E56B48A62D3 /* FIT.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FIT.swift; sourceTree = "<group>"; };
+		75E30542E558DD7B199F7468 /* CalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarView.swift; sourceTree = "<group>"; };
+		83639CB8108EE677F6801B2C /* WorkoutLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutLibrary.swift; sourceTree = "<group>"; };
+		840B4D6F66244AD7CB370A97 /* Strava.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Strava.swift; sourceTree = "<group>"; };
+		960164EBB7D0579E2DE0B920 /* Levels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Levels.swift; sourceTree = "<group>"; };
+		A30885ECE16FECDC0EB5FFE1 /* Platform.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Platform.swift; sourceTree = "<group>"; };
+		A9B33AEBB33EC9E69B85A99D /* Bluetooth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Bluetooth.swift; sourceTree = "<group>"; };
+		ACDEAE5492C84C622A61D06D /* Plan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Plan.swift; sourceTree = "<group>"; };
+		BDF103452FC4D746CE736D52 /* Route.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Route.swift; sourceTree = "<group>"; };
+		CA8B661C39CA4606D0A7AFD3 /* MainViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainViews.swift; sourceTree = "<group>"; };
+		CAC343051534CA5C93BAAB4A /* AdhocWorkouts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdhocWorkouts.swift; sourceTree = "<group>"; };
+		CE19C3C715FAA3E9FE210E38 /* Postpone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Postpone.swift; sourceTree = "<group>"; };
+		CFC9C7CB94A3EF8B6BFADA08 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		D2531587E4BDCF750AC5398A /* WorkoutsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutsView.swift; sourceTree = "<group>"; };
+		E101F53FF1BBA7FC35367064 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		E39A261B110D067577D800D0 /* SummitRoad.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = SummitRoad.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F13C14B0600A5B6652F0855D /* RideImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RideImport.swift; sourceTree = "<group>"; };
+		FC57A4D3B87C2020ABEBFEAB /* LevelViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LevelViews.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		286EBC6E891FE7A87CD1A0B6 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				E39A261B110D067577D800D0 /* SummitRoad.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		3792FD12BD090B928D079E12 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				5D3358CB5B0C7C63A43F873E /* Backgrounds */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		6260FAE6A231D0BC74C8B4D1 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				89C444A7EBE647E3B2D3B13E /* SummitTrainer */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		72E374EA46098A043082A28B = {
+			isa = PBXGroup;
+			children = (
+				D02E76E488FF5B4E5D3BA50C /* ios */,
+				3792FD12BD090B928D079E12 /* Resources */,
+				6260FAE6A231D0BC74C8B4D1 /* Sources */,
+				286EBC6E891FE7A87CD1A0B6 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		89C444A7EBE647E3B2D3B13E /* SummitTrainer */ = {
+			isa = PBXGroup;
+			children = (
+				CAC343051534CA5C93BAAB4A /* AdhocWorkouts.swift */,
+				16324B51ED511E59447DD690 /* App.swift */,
+				CFC9C7CB94A3EF8B6BFADA08 /* AppState.swift */,
+				A9B33AEBB33EC9E69B85A99D /* Bluetooth.swift */,
+				75E30542E558DD7B199F7468 /* CalendarView.swift */,
+				684163291F671E56B48A62D3 /* FIT.swift */,
+				960164EBB7D0579E2DE0B920 /* Levels.swift */,
+				FC57A4D3B87C2020ABEBFEAB /* LevelViews.swift */,
+				CA8B661C39CA4606D0A7AFD3 /* MainViews.swift */,
+				E101F53FF1BBA7FC35367064 /* Models.swift */,
+				ACDEAE5492C84C622A61D06D /* Plan.swift */,
+				A30885ECE16FECDC0EB5FFE1 /* Platform.swift */,
+				CE19C3C715FAA3E9FE210E38 /* Postpone.swift */,
+				F13C14B0600A5B6652F0855D /* RideImport.swift */,
+				639EBFC9BC1575E65B9CB1E0 /* RideSession.swift */,
+				5E464190C1418512A5A8474B /* RideView.swift */,
+				BDF103452FC4D746CE736D52 /* Route.swift */,
+				1705F1596D8A528D1FBB0441 /* RouteViews.swift */,
+				198AEEDDC610113CE7359674 /* Scoring.swift */,
+				840B4D6F66244AD7CB370A97 /* Strava.swift */,
+				56582B192332A5F258137D77 /* Sync.swift */,
+				00B43D0C23597FC627ED915F /* Updater.swift */,
+				83639CB8108EE677F6801B2C /* WorkoutLibrary.swift */,
+				D2531587E4BDCF750AC5398A /* WorkoutsView.swift */,
+			);
+			path = SummitTrainer;
+			sourceTree = "<group>";
+		};
+		D02E76E488FF5B4E5D3BA50C /* ios */ = {
+			isa = PBXGroup;
+			children = (
+				053D8F6272E493AE2ACF916F /* Assets.xcassets */,
+			);
+			path = ios;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		68EA21C1A96917F99D27A9DA /* SummitRoad */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2C5F03858E71B0B16D1B6C82 /* Build configuration list for PBXNativeTarget "SummitRoad" */;
+			buildPhases = (
+				A4CBC52C02F0B369462CA07D /* Sources */,
+				3038876A4F861F413059C17E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SummitRoad;
+			packageProductDependencies = (
+			);
+			productName = SummitRoad;
+			productReference = E39A261B110D067577D800D0 /* SummitRoad.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		B7198DBC5C7C4D5022D2F6C4 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					68EA21C1A96917F99D27A9DA = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = B300720FBD443B8CCDB177E3 /* Build configuration list for PBXProject "SummitRoad" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 72E374EA46098A043082A28B;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 286EBC6E891FE7A87CD1A0B6 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				68EA21C1A96917F99D27A9DA /* SummitRoad */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		3038876A4F861F413059C17E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C8903A80230A4AE2437DA1EB /* Assets.xcassets in Resources */,
+				379A41C351BC89E4D0B0F7F6 /* Backgrounds in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A4CBC52C02F0B369462CA07D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				23985AEE5946DDF72DF01233 /* AdhocWorkouts.swift in Sources */,
+				4D21B89546FDD56D1407992A /* App.swift in Sources */,
+				AA24FCA991907D174223803E /* AppState.swift in Sources */,
+				EF8C758A9A54FBA5E75EBF37 /* Bluetooth.swift in Sources */,
+				DE048AFAB8CE14D630148A0E /* CalendarView.swift in Sources */,
+				1707391F9951620345FB5286 /* FIT.swift in Sources */,
+				C42603368218E4516C032EAD /* LevelViews.swift in Sources */,
+				52D3FFDC9B9F4B4199B22276 /* Levels.swift in Sources */,
+				B11726B8C37F2B5B6838ADAA /* MainViews.swift in Sources */,
+				75A538C80208A2EFDE2AFD51 /* Models.swift in Sources */,
+				784462475C72900FE1E21BA1 /* Plan.swift in Sources */,
+				9F0C15F4C1F45D5E8BA58BFA /* Platform.swift in Sources */,
+				0206B5B6E45AB82D0B957953 /* Postpone.swift in Sources */,
+				B843D680390B3AB4552FDB39 /* RideImport.swift in Sources */,
+				FA2255BCB031D4F45F3A1BF8 /* RideSession.swift in Sources */,
+				B98C59148EF0CC8B824C6075 /* RideView.swift in Sources */,
+				D4A3777645DDD6BAC66F935C /* Route.swift in Sources */,
+				0EE9C2731180182FC19F5DFB /* RouteViews.swift in Sources */,
+				918FC41855311BCABFC16B9E /* Scoring.swift in Sources */,
+				61D17C75A4E66A55DE59AFF5 /* Strava.swift in Sources */,
+				F378635504103AB711C88E46 /* Sync.swift in Sources */,
+				88A3A48E4627551D625A38AE /* Updater.swift in Sources */,
+				AAF04B69CBA7DC52F021F08D /* WorkoutLibrary.swift in Sources */,
+				E2C2CB6F8BCE7DC3B61F581E /* WorkoutsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		16F95F2B17C47C8ACACE64DC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MARKETING_VERSION = 1.0.37;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
+		};
+		7FEB9519B0FF4B563C0EE8EB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ios/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.trommy76.summitroad;
+				PRODUCT_NAME = SummitRoad;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		92B60539A98A8AC6FF315B22 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MARKETING_VERSION = 1.0.37;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Debug;
+		};
+		C5B35BC068A68B3EC2AB265D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ios/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.trommy76.summitroad;
+				PRODUCT_NAME = SummitRoad;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		2C5F03858E71B0B16D1B6C82 /* Build configuration list for PBXNativeTarget "SummitRoad" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C5B35BC068A68B3EC2AB265D /* Debug */,
+				7FEB9519B0FF4B563C0EE8EB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B300720FBD443B8CCDB177E3 /* Build configuration list for PBXProject "SummitRoad" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				92B60539A98A8AC6FF315B22 /* Debug */,
+				16F95F2B17C47C8ACACE64DC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = B7198DBC5C7C4D5022D2F6C4 /* Project object */;
+}

@@ -1,5 +1,8 @@
 import SwiftUI
+import UniformTypeIdentifiers
+#if os(macOS)
 import AppKit
+#endif
 
 private let dayFormatter: DateFormatter = {
     let f = DateFormatter()
@@ -517,11 +520,15 @@ struct RideReportView: View {
                         Spacer()
                         Button("Upload to Strava") { Task { await app.uploadToStrava(r) } }
                             .disabled(!strava.connected || r.stravaID != nil)
+                        #if os(macOS)
                         Button("Send to Strava (manual)") {
                             NSWorkspace.shared.activateFileViewerSelecting([store.fitURL(for: r)])
-                            NSWorkspace.shared.open(URL(string: "https://www.strava.com/upload/select")!)
+                            Platform.open(URL(string: "https://www.strava.com/upload/select")!)
                         }
                         Button("Reveal .FIT") { NSWorkspace.shared.activateFileViewerSelecting([store.fitURL(for: r)]) }
+                        #else
+                        ShareLink(item: store.fitURL(for: r)) { Label("Share .FIT", systemImage: "square.and.arrow.up") }
+                        #endif
                     }
                 }
 
@@ -533,10 +540,14 @@ struct RideReportView: View {
                                 .font(.callout).foregroundColor(.gray)
                         }
                         Spacer()
+                        #if os(macOS)
                         Button("Send to Garmin") {
                             NSWorkspace.shared.activateFileViewerSelecting([store.fitURL(for: r)])
-                            NSWorkspace.shared.open(URL(string: "https://connect.garmin.com/modern/import-data")!)
+                            Platform.open(URL(string: "https://connect.garmin.com/modern/import-data")!)
                         }
+                        #else
+                        ShareLink(item: store.fitURL(for: r)) { Label("Share .FIT", systemImage: "square.and.arrow.up") }
+                        #endif
                     }
                 }
             }
@@ -782,6 +793,7 @@ struct SettingsView: View {
                     }
                 }
 
+                #if os(macOS)
                 Card {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Strava").font(.headline)
@@ -806,6 +818,7 @@ struct SettingsView: View {
                         if !strava.status.isEmpty { Text(strava.status).font(.caption).foregroundColor(.gray) }
                     }
                 }
+                #endif
 
                 Card {
                     VStack(alignment: .leading, spacing: 10) {
@@ -862,6 +875,7 @@ struct SettingsView: View {
                     }
                 }
 
+                #if os(macOS)
                 Card {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Software Update").font(.headline)
@@ -880,13 +894,16 @@ struct SettingsView: View {
                         if !updater.status.isEmpty { Text(updater.status).font(.caption).foregroundColor(.gray) }
                     }
                 }
+                #endif
 
                 Card {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Data").font(.headline)
                         Text("Rides, plan and .FIT files are stored in your Application Support folder.").foregroundColor(.gray)
+                        #if os(macOS)
                         Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([store.dir]) }
                         Button("Open .FIT Folder") { NSWorkspace.shared.open(store.dir.appendingPathComponent("fit")) }
+                        #endif
                         Button("Delete Training Plan", role: .destructive) { confirmDelete = true }
                             .disabled(store.plan == nil)
                     }

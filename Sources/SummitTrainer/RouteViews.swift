@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+#endif
 import UniformTypeIdentifiers
 
 /// Colour for a gradient: flat is blue, then green, yellow, orange and red as it gets steeper. The colours blend
@@ -100,16 +102,19 @@ struct RoutesSection: View {
     @State private var importURL: URL?
     @State private var importName = ""
     @State private var importError = ""
+    @State private var picking = false
 
-    private func chooseFile() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [UTType(filenameExtension: "gpx") ?? .xml]
-        panel.allowsMultipleSelection = false
-        panel.message = "Choose a GPX file (a route or a recorded ride with elevation)"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+    /// Copies the chosen file somewhere the app can always read it, then asks for a name.
+    private func chosen(_ result: Result<[URL], Error>) {
+        guard case .success(let urls) = result, let url = urls.first else { return }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let copy = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
+        try? FileManager.default.removeItem(at: copy)
+        do { try FileManager.default.copyItem(at: url, to: copy) } catch { importError = "That file could not be read."; return }
         importError = ""
         importName = url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespaces)
-        importURL = url
+        importURL = copy
     }
 
     var body: some View {
@@ -138,18 +143,21 @@ struct RoutesSection: View {
                 }
             }
             HStack {
-                Button("Import GPX…") { chooseFile() }
+                Button("Import GPX…") { picking = true }
+                #if os(macOS)
                 Button("Open Routes Folder") { NSWorkspace.shared.open(store.routesDir) }
+                #endif
                 if store.routes.isEmpty { Text("No routes yet. Import a GPX file to get started.").foregroundColor(.gray) }
             }
             if !importError.isEmpty { Text(importError).font(.caption).foregroundColor(.orange) }
         }
+        .fileImporter(isPresented: $picking, allowedContentTypes: [UTType(filenameExtension: "gpx") ?? .xml], onCompletion: { chosen($0.map { [$0] }) })
         .sheet(item: $selected) { r in RouteDetail(route: r) { selected = nil } }
         .sheet(isPresented: Binding(get: { importURL != nil }, set: { if !$0 { importURL = nil } })) {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Name this route").font(.title2.bold())
                 TextField("Route name", text: $importName).frame(width: 320)
-                Text("The file is copied into this app's data folder on your Mac. It is never uploaded or synced.")
+                Text("The file is copied into this app's data folder on this device. It is never uploaded or synced.")
                     .font(.caption).foregroundColor(.gray)
                 HStack {
                     Button("Cancel") { importURL = nil }

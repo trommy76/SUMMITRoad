@@ -109,6 +109,20 @@ The **Levels** tab scores you from 0 to 10 in six zones: Endurance, Tempo, Sweet
 
 After each ride the report shows an **Athlete Levels image**: your bars, what that ride added (in green), and the ride's power and heart rate along the bottom, over a darkened photo. The photo is picked from the ones in `Resources/Backgrounds`, the same one every time for a given ride. To use your own, put .jpg or .png files in `~/Library/Application Support/SummitTrainer/backgrounds/`; if that folder has any, they are used instead. Strava and Garmin can't take a picture on upload, so the image stays on your Mac (save or share it by hand).
 
+## iPhone and iPad
+
+SummitRoad also builds as an iPad and iPhone app from the same code (`project.yml`, generated with `brew install xcodegen`). It talks to the trainer over Bluetooth like the Mac app and keeps the screen awake while you ride. It has no in-app updater (TestFlight updates it), no Strava link (use **Share .FIT** on a ride instead), and the iPhone layout is a tab bar.
+
+Getting it onto your devices with TestFlight, one-time setup:
+
+1. Join the Apple Developer Program (developer.apple.com/programs, $99 USD/year) and note your **Team ID** (Membership details).
+2. In Xcode > Settings > Accounts, sign in with that Apple ID.
+3. At appstoreconnect.apple.com > Apps > **+** > New App: platform iOS, name *SummitRoad*, bundle ID `com.trommy76.summitroad` (register it under Certificates, Identifiers & Profiles first, or change `PRODUCT_BUNDLE_IDENTIFIER` in `project.yml`), any SKU.
+4. Run `TEAM_ID=YOURTEAMID ./ios_testflight.sh`. It archives, signs and uploads a build.
+5. Once Apple finishes processing (5 to 15 minutes), open the app in App Store Connect > TestFlight, add yourself as an internal tester, then install **TestFlight** from the App Store on your iPad and accept the invitation.
+
+Each later release is just step 4 again; builds expire after 90 days.
+
 ## Importing rides
 
 On the Rides tab, **Import rides…** brings in rides recorded elsewhere (a bike computer, Zwift, Strava's export). It reads `.fit`, `.tcx` and gzipped files such as `.fit.gz`. Rides with power count towards your athlete levels and training load but have no workout score. Rides without a power meter are imported with power estimated from speed (or GPS position), elevation and your rider weight in Settings. That estimate ignores wind and drafting, so it is rough: those rides are marked as estimated and stay out of your levels unless you turn on *Count rides with estimated power* in Settings. Rides already in your history are skipped, and imported rides are not uploaded to Strava.

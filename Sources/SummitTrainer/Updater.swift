@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import AppKit
 
@@ -136,3 +137,19 @@ final class Updater: ObservableObject {
         }
     }
 }
+
+#else
+import SwiftUI
+
+/// iOS builds are updated through TestFlight / the App Store, so there is nothing to check here.
+@MainActor
+final class Updater: ObservableObject {
+    struct Available { let version: String; let pageURL: URL }
+    @Published var available: Available?
+    @Published var status = ""
+    @Published var busy = false
+    static var currentVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0" }
+    func check(silent: Bool = false) async {}
+    func install() async {}
+}
+#endif
