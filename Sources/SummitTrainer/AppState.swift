@@ -35,6 +35,8 @@ final class Store: ObservableObject {
     /// Hooks used by the optional home-server sync.
     var onRideSaved: ((RideSummary) -> Void)?
     var onRideDeleted: ((UUID) -> Void)?
+    var onRouteSaved: ((String) -> Void)?
+    var onRouteDeleted: ((String) -> Void)?
     var onFTPAdded: ((FTPEntry) -> Void)?
     var onPlanChanged: (() -> Void)?
     var onSettingsChanged: (() -> Void)?
@@ -136,7 +138,7 @@ final class Store: ObservableObject {
         if !fromSync { onRideSaved?(ride) }
     }
 
-    // MARK: Routes (GPX files kept in the app's data folder, never synced or uploaded)
+    // MARK: Routes (GPX files kept in the app's data folder; copied to your own home server when connected)
 
     var routesDir: URL { dir.appendingPathComponent("routes", isDirectory: true) }
 
@@ -160,12 +162,26 @@ final class Store: ObservableObject {
         let route = try RouteBuilder.route(fromGPX: data, name: clean)      // throws if it is not usable
         try data.write(to: routesDir.appendingPathComponent(clean + ".gpx"), options: .atomic)
         reloadRoutes()
+        onRouteSaved?(clean)
         return route
     }
 
     func deleteRoute(_ r: Route) {
         try? FileManager.default.removeItem(at: routesDir.appendingPathComponent(r.name + ".gpx"))
         reloadRoutes()
+        onRouteDeleted?(r.name)
+    }
+
+    /// Writes a route fetched from the server (no upload back).
+    func saveDownloadedRoute(name: String, gpx: Data) -> Bool {
+        guard (try? RouteBuilder.route(fromGPX: gpx, name: name)) != nil else { return false }
+        do { try gpx.write(to: routesDir.appendingPathComponent(name + ".gpx"), options: .atomic) } catch { return false }
+        return true
+    }
+
+    /// Removes a route the server says was deleted elsewhere (no delete sent back).
+    func removeRouteFile(named name: String) {
+        try? FileManager.default.removeItem(at: routesDir.appendingPathComponent(name + ".gpx"))
     }
 
     func fitURL(for r: RideSummary) -> URL { dir.appendingPathComponent("fit/\(r.id.uuidString).fit") }
@@ -215,6 +231,8 @@ final class AppState: ObservableObject {
         ble.onRememberHR = { [weak self] id in self?.store.profile.hrID = id.uuidString }
         store.onRideSaved = { [weak self] r in self?.sync.rideSaved(r) }
         store.onRideDeleted = { [weak self] id in self?.sync.rideDeleted(id) }
+        store.onRouteSaved = { [weak self] n in self?.sync.routeSaved(n) }
+        store.onRouteDeleted = { [weak self] n in self?.sync.routeDeleted(n) }
         store.onFTPAdded = { [weak self] e in self?.sync.ftpAdded(e) }
         store.onPlanChanged = { [weak self] in self?.sync.planChanged() }
         store.onSettingsChanged = { [weak self] in self?.sync.settingsChanged() }

@@ -30,6 +30,7 @@ After that:
 - your **training plan** (including completed workouts) and settings (max heart rate, voice cues, auto-upload to
   Strava) sync too: the most recent change wins, so edit on whichever Mac you like. Trainer/strap pairings and the
   Strava login stay per Mac,
+- your **GPX routes** sync too (matched by name): add one on any device and it appears on the others; deleting one removes it everywhere. They are stored only on your server, per user,
 - the app downloads anything new from the server each time it starts,
 - **Sync Now** does a full two-way sync.
 

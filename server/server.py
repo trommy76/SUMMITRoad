@@ -9,7 +9,7 @@ Standard library only. Data lives in $SUMMITROAD_DATA (default /data).
 """
 import base64, getpass, hashlib, hmac, http.cookies, json, os, queue, re, secrets, sqlite3, struct, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 def _read_version():
     try:
@@ -45,6 +45,8 @@ LOG_MAX_ROWS = 20000
 DATA_DIR = os.environ.get("SUMMITROAD_DATA", "/data")
 PORT = int(os.environ.get("SUMMITROAD_PORT", "8787"))
 MAX_BODY = 64 * 1024 * 1024
+MAX_GPX = 25 * 1024 * 1024
+ROUTE_NAME_RE = re.compile(r"^[^/\\\x00-\x1f]{1,120}$")
 UUID_RE = re.compile(r"^[0-9a-fA-F-]{36}$")
 DB_PATH = os.path.join(DATA_DIR, "summitroad.db")
 
@@ -56,6 +58,7 @@ CREATE TABLE IF NOT EXISTS rides (
 CREATE TABLE IF NOT EXISTS ftp (user TEXT, id TEXT, date TEXT, ftp REAL, method TEXT, PRIMARY KEY (user, id));
 CREATE TABLE IF NOT EXISTS docs (user TEXT, name TEXT, data TEXT, updated REAL, deleted INTEGER DEFAULT 0, PRIMARY KEY (user, name));
 CREATE TABLE IF NOT EXISTS doc_history (user TEXT, name TEXT, rev INTEGER, data TEXT, updated REAL, deleted INTEGER DEFAULT 0, device TEXT, ts REAL, PRIMARY KEY (user, name, rev));
+CREATE TABLE IF NOT EXISTS routes (user TEXT, name TEXT, gpx BLOB, updated REAL, deleted INTEGER DEFAULT 0, PRIMARY KEY (user, name));
 CREATE TABLE IF NOT EXISTS mfa (user TEXT PRIMARY KEY, secret TEXT, enabled INTEGER DEFAULT 0, last_step INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS recovery (user TEXT, hash TEXT, PRIMARY KEY (user, hash));
 CREATE TABLE IF NOT EXISTS app_passwords (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, name TEXT, salt TEXT, hash TEXT, created REAL, last_used REAL);
@@ -672,6 +675,16 @@ class Handler(BaseHTTPRequestHandler):
                     self.ev(u, "sync" if self.client_kind() == "app" else "dashboard_view")
                 rows = c.execute("SELECT id, data, deleted, fit FROM rides WHERE user=? ORDER BY date DESC", (u,)).fetchall()
                 return self.send(200, [ride_summary(r) for r in rows])
+            if parts == ["routes"]:
+                rows = c.execute("SELECT name, updated, deleted, length(gpx) AS size FROM routes WHERE user=? ORDER BY name", (u,)).fetchall()
+                return self.send(200, [{"name": r["name"], "updated": r["updated"], "deleted": bool(r["deleted"]), "size": r["size"] or 0} for r in rows])
+            if len(parts) == 2 and parts[0] == "routes":
+                row = c.execute("SELECT gpx, deleted FROM routes WHERE user=? AND name=?", (u, unquote(parts[1]))).fetchone()
+                if not row:
+                    return self.send(404, {"error": "no such route"})
+                if row["deleted"]:
+                    return self.send(410, {"error": "deleted"})
+                return self.send(200, bytes(row["gpx"]), "application/gpx+xml")
             if len(parts) in (2, 3) and parts[0] == "rides" and UUID_RE.match(parts[1]):
                 row = c.execute("SELECT * FROM rides WHERE user=? AND id=?", (u, parts[1].upper())).fetchone()
                 if not row:
@@ -761,6 +774,21 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, {"applied": False, "rev": info["rev"], "updated": info["updated"]})
             self.ev(u, "plan_cleared" if (parts[2] == "plan" and deleted) else parts[2] + "_updated", "rev %d from %s" % (info, device))
             return self.send(200, {"applied": True, "rev": info, "updated": updated})
+        if len(parts) == 3 and parts[:2] == ["api", "routes"]:
+            name = unquote(parts[2])
+            if not ROUTE_NAME_RE.match(name):
+                return self.send(400, {"error": "bad route name"})
+            if len(data) > MAX_GPX:
+                return self.send(413, {"error": "gpx too large"})
+            if b"<gpx" not in data[:4096].lower() and b"<gpx" not in data.lower():
+                return self.send(400, {"error": "that is not a GPX file"})
+            with db() as c:
+                row = c.execute("SELECT deleted FROM routes WHERE user=? AND name=?", (u, name)).fetchone()
+                self.ev(u, "route_updated" if row and not row["deleted"] else "route_added", name[:60])
+                c.execute("INSERT INTO routes (user, name, gpx, updated, deleted) VALUES (?,?,?,?,0) "
+                          "ON CONFLICT(user, name) DO UPDATE SET gpx=excluded.gpx, updated=excluded.updated, deleted=0",
+                          (u, name, data, time.time()))
+            return self.send(200, {"ok": True})
         if len(parts) < 3 or parts[0] != "api" or not UUID_RE.match(parts[2]):
             return self.send(404, {"error": "not found"})
         rid = parts[2].upper()
@@ -967,6 +995,7 @@ class Handler(BaseHTTPRequestHandler):
             with db() as c:
                 c.execute("DELETE FROM rides WHERE user=?", (name,))
                 c.execute("DELETE FROM ftp WHERE user=?", (name,))
+                c.execute("DELETE FROM routes WHERE user=?", (name,))
                 c.execute("DELETE FROM docs WHERE user=?", (name,))
                 c.execute("DELETE FROM doc_history WHERE user=?", (name,))
                 c.execute("DELETE FROM sessions WHERE user=?", (name,))
@@ -978,6 +1007,14 @@ class Handler(BaseHTTPRequestHandler):
             if cur.rowcount:
                 self.ev(u, "user_deleted", name)
             return self.send(200 if cur.rowcount else 404, {"ok": cur.rowcount > 0})
+        if len(parts) == 3 and parts[:2] == ["api", "routes"]:
+            name = unquote(parts[2])
+            with db() as c:
+                self.ev(u, "route_deleted", name[:60])
+                c.execute("INSERT INTO routes (user, name, gpx, deleted, updated) VALUES (?,?,NULL,1,?) "
+                          "ON CONFLICT(user, name) DO UPDATE SET deleted=1, gpx=NULL, updated=excluded.updated",
+                          (u, name, time.time()))
+            return self.send(200, {"ok": True})
         if len(parts) == 3 and parts[:2] == ["api", "rides"] and UUID_RE.match(parts[2]):
             rid = parts[2].upper()
             with db() as c:
@@ -1157,7 +1194,7 @@ async function delUser(name){
   try{await call('DELETE','/api/users/'+encodeURIComponent(name));say('umsg','Deleted '+name+'.',true);loadUsers()}
   catch(e){say('umsg',e.message)}}
 let me='';
-const EV={login:'Signed in',login_failed:'Failed sign-in',throttled:'Blocked (too many failures)',sync:'App synced',dashboard_view:'Viewed dashboard',ride_added:'Ride uploaded',ride_updated:'Ride updated',ride_deleted:'Ride deleted',logout:'Signed out',plan_conflict:'Plan conflict (blocked an overwrite)',settings_conflict:'Settings conflict (blocked an overwrite)',plan_restored:'Plan version restored',settings_restored:'Settings version restored',mfa_enabled:'Two-factor turned on',mfa_disabled:'Two-factor turned off',mfa_reset:'Two-factor reset by admin',mfa_failed:'Failed two-factor code',recovery_code_used:'Recovery code used',recovery_codes_regenerated:'New recovery codes made',app_password_created:'App password created',app_password_revoked:'App password revoked',plan_updated:'Training plan synced',plan_cleared:'Training plan cleared',settings_updated:'Settings synced',ftp_added:'FTP result added',password_changed:'Password changed',password_change_failed:'Password change failed',password_reset:'Password reset',user_added:'User added',user_deleted:'User deleted'};
+const EV={login:'Signed in',login_failed:'Failed sign-in',throttled:'Blocked (too many failures)',sync:'App synced',dashboard_view:'Viewed dashboard',ride_added:'Ride uploaded',ride_updated:'Ride updated',ride_deleted:'Ride deleted',logout:'Signed out',plan_conflict:'Plan conflict (blocked an overwrite)',settings_conflict:'Settings conflict (blocked an overwrite)',plan_restored:'Plan version restored',settings_restored:'Settings version restored',mfa_enabled:'Two-factor turned on',mfa_disabled:'Two-factor turned off',mfa_reset:'Two-factor reset by admin',mfa_failed:'Failed two-factor code',recovery_code_used:'Recovery code used',recovery_codes_regenerated:'New recovery codes made',app_password_created:'App password created',app_password_revoked:'App password revoked',plan_updated:'Training plan synced',plan_cleared:'Training plan cleared',settings_updated:'Settings synced',ftp_added:'FTP result added',password_changed:'Password changed',password_change_failed:'Password change failed',password_reset:'Password reset',user_added:'User added',user_deleted:'User deleted',route_added:'Route uploaded',route_updated:'Route updated',route_deleted:'Route deleted'};
 const KIND={endurance:'Endurance',tempo:'Tempo',sweetSpot:'Sweet Spot',threshold:'Threshold',overUnder:'Over-Unders',vo2:'VO2 Max',vo2OnOff:'VO2 Max On-Offs',ftpRamp:'FTP Ramp Test',ftp20:'FTP 20-Minute Test',adhoc:'Workout'};
 const GOAL={raiseFTP:'Raise my FTP',timeTrial:'Time trial / sustained power',roadRace:'Road race / criterium',century:'Century / long event',general:'General fitness'};
 const PHASE={base:'Base',build:'Build',specialty:'Specialty'};

@@ -138,6 +138,16 @@ final class SyncClient: ObservableObject {
         Task { _ = try? await send("DELETE", "api/rides/\(id.uuidString)") }
     }
 
+    func routeSaved(_ name: String) {
+        guard configured else { return }
+        Task { _ = await pushRoute(name) }
+    }
+
+    func routeDeleted(_ name: String) {
+        guard configured else { return }
+        Task { _ = try? await send("DELETE", "api/routes/\(name)") }
+    }
+
     func ftpAdded(_ e: FTPEntry) {
         guard configured else { return }
         Task { _ = await pushFTP(e) }
@@ -212,6 +222,18 @@ final class SyncClient: ObservableObject {
         }
     }
 
+    private func pushRoute(_ name: String) async -> Bool {
+        do {
+            let gpx = try Data(contentsOf: store.routesDir.appendingPathComponent(name + ".gpx"))
+            let (_, code) = try await send("PUT", "api/routes/\(name)", body: gpx, type: "application/gpx+xml")
+            guard (200..<300).contains(code) else { throw SyncError.http(code) }
+            return true
+        } catch {
+            status = "Sync failed: \(error.localizedDescription)"
+            return false
+        }
+    }
+
     private func pushFTP(_ e: FTPEntry) async -> Bool {
         do {
             let (_, code) = try await send("PUT", "api/ftp/\(e.id.uuidString)", body: try encoder.encode(e))
@@ -265,6 +287,7 @@ final class SyncClient: ObservableObject {
             }
 
             try await syncFTP(upload: upload, download: download, up: &up, down: &down)
+            try await syncRoutes(upload: upload, download: download, up: &up, down: &down, removed: &removed)
             let notes = await syncDocs(upload: upload, download: download)
             lastSync = Date()
             var parts: [String] = []
@@ -466,6 +489,37 @@ final class SyncClient: ObservableObject {
             status = "Sync failed: \(error.localizedDescription)"
         }
         return notes
+    }
+
+    private struct RemoteRoute: Decodable {
+        let name: String
+        let deleted: Bool?
+    }
+
+    /// GPX routes, matched by name: new ones go up and down, and a route deleted on one device disappears from the others.
+    private func syncRoutes(upload: Bool, download: Bool, up: inout Int, down: inout Int, removed: inout Int) async throws {
+        let (data, code) = try await send("GET", "api/routes")
+        guard code == 200 else { return }                 // an older server without routes: carry on
+        let remote = try decoder.decode([RemoteRoute].self, from: data)
+        let active = Set(remote.filter { $0.deleted != true }.map { $0.name })
+        let gone = Set(remote.filter { $0.deleted == true }.map { $0.name })
+        let local = Set(store.routes.map { $0.name })
+        var changed = false
+
+        for name in local {
+            if gone.contains(name) {
+                if download { store.removeRouteFile(named: name); removed += 1; changed = true }
+            } else if upload && !active.contains(name) {
+                if await pushRoute(name) { up += 1 }
+            }
+        }
+        if download {
+            for name in active where !local.contains(name) {
+                let (d, c) = try await send("GET", "api/routes/\(name)")
+                if c == 200, store.saveDownloadedRoute(name: name, gpx: d) { down += 1; changed = true }
+            }
+        }
+        if changed { store.reloadRoutes() }
     }
 
     private func syncFTP(upload: Bool, download: Bool, up: inout Int, down: inout Int) async throws {
